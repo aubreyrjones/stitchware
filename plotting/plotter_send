@@ -1,20 +1,35 @@
 #!/usr/bin/env python3
 
 import serial, argparse
+import hpgl
+
+plotter_settings = {
+    "titan" : {
+        "baudrate": 38400,
+        "xonxoff": True,
+        "stopbits":serial.STOPBITS_ONE
+    }
+}
 
 arg_parser = argparse.ArgumentParser(description="Send an HPGL file to a plotter.")
-arg_parser.add_argument('--baud', type=int, default=38400, help="Baud rate for the plotter.")
+arg_parser.add_argument('--plotter', default='titan', choices=sorted(plotter_settings.keys()), type=str, help="choose plotter settings.")
+arg_parser.add_argument('--dry-run', default=False, const=True, action='store_const', help="do everything except open the serial port and send the file.")
 arg_parser.add_argument('port', type=str, help="The serial port the plotter is connected to.")
 arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
 args = arg_parser.parse_args()
 
-hpgl = None
-
+hpgl_lines = None
 with open(args.file, 'r') as f:
-    hpgl = f.readlines()
+    hpgl_lines = f.readlines()
+print(f"Read {len(hpgl_lines)} lines of HPGL.")
 
-print("".join(hpgl))
+plot = hpgl.parse_lines(hpgl_lines)
+print(plot.cuttable_repr())
 
-#plotter_port = serial.Serial(port=args.port, baudrate=args.baud, xonxoff=True, stopbits=serial.STOPBITS_ONE)
+chosen_plotter_settings = plotter_settings[args.plotter]
+
+if args.dry_run:
+    exit(0) # quit at this point since we were just asked for a dry run.
 
 
+plotter_port = serial.Serial(port=args.port, **chosen_plotter_settings)

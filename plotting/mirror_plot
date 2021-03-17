@@ -4,7 +4,7 @@ import argparse
 from functools import reduce
 
 def parse_list(body):
-    return list(map(float, body.split(',')))
+    return [float(f) for f in body.split(',')]
 
 def list_max(lst, curMax):
     return reduce(max, lst, curMax)

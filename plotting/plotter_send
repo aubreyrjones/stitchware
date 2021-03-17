@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+
+import serial, argparse
+
+arg_parser = argparse.ArgumentParser(description="Send an HPGL file to a plotter.")
+arg_parser.add_argument('--baud', type=int, default=38400, help="Baud rate for the plotter.")
+arg_parser.add_argument('port', type=str, help="The serial port the plotter is connected to.")
+arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
+args = arg_parser.parse_args()
+
+hpgl = None
+
+with open(args.file, 'r') as f:
+    hpgl = f.readlines()
+
+print("".join(hpgl))
+
+#plotter_port = serial.Serial(port=args.port, baudrate=args.baud, xonxoff=True, stopbits=serial.STOPBITS_ONE)
+
+

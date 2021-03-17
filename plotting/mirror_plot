@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+
+import argparse
+from functools import reduce
+
+def parse_list(body):
+    return list(map(float, body.split(',')))
+
+def list_max(lst, curMax):
+    return reduce(max, lst, curMax)
+
+arg_parser = argparse.ArgumentParser(description="flip a plt")
+arg_parser.add_argument('file', type=str, nargs=1)
+args = arg_parser.parse_args()
+
+lines = []
+
+with open(args.file[0]) as f:
+    lines = f.readlines()
+
+setupLineNumbers = {}
+
+maxX = 0.0
+maxY = 0.0
+
+for lineNumber, command in enumerate(lines):
+    prefix = command[:2]
+    if prefix in ('IP', 'SC'):
+        setupLineNumbers[prefix] = lineNumber
+    if prefix in ('PU', 'PD', 'PA'):
+        body = command[2:-2]
+        if body:
+            coords = parse_list(body)
+            maxX = list_max(coords[::2], maxX)
+            maxY = list_max(coords[1::2], maxY)
+
+lines[setupLineNumbers['IP']] = 'IP0,%s,%s,0\n' % (maxY, maxX)
+lines[setupLineNumbers['SC']] = 'SC0,1,0,-1,2;\n'
+
+print("".join(lines))

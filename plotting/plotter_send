@@ -2,8 +2,11 @@
 
 import serial, argparse, sys, subprocess
 from itertools import chain
+from functools import reduce
+from PIL import Image
 import curtsies
 import hpgl
+
 
 plotter_settings = {
     "titan" : {
@@ -50,16 +53,41 @@ def prompt_input():
             else:
                 print("What?")
 
+def max_image_size(images):
+    maxX = 0
+    maxY = 0
+    for i in images:
+        maxX = max(maxX, i.size[0])
+        maxY = max(maxY, i.size[1])
+    return (maxX, maxY)
+
+def paste_up(img, newsize):
+    retval = Image.new('RGBA', newsize)
+    w, h = newsize
+    ow, oh = img.size
+    x = w - ow
+    y = h - oh
+    retval.paste(img, (0, y))
+    return retval
+
+def composite_all(images):
+    maxsize = max_image_size(images)
+    composited = reduce(Image.alpha_composite, map(lambda i: paste_up(i, maxsize), images))
+    retval = Image.new('RGB', maxsize, color=(255, 255, 255))
+    retval.paste(composited, (0, 0, *maxsize))
+    return retval
+
 if args.preview:
-    filenames = ['preview-raw.png']
-    hpgl.render_preview(plot.linear(), 'preview-raw.png')
+    
+    images = []
 
-    for p in passes['work'].keys():
-        filename = f"preview-{p}.png"
-        filenames.append(filename)
-        hpgl.render_preview(work_passes[p], filename)
+    images.append(hpgl.image_preview(work_passes['knife'], (255, 0, 0)))
+    if 'pen' in work_passes:
+        images.append(hpgl.image_preview(work_passes['pen'], (0, 0, 255)))
 
-    subprocess.run(['gthumb'] + filenames)
+    composited = composite_all(images)
+    composited.show()
+
     print("Do those look good? (y/n)")
     if prompt_input() == 'n':
         exit(1)

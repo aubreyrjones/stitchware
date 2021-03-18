@@ -4,7 +4,9 @@ Designed to handle CLO3D-specific HPGL outputs.
 
 from itertools import chain
 from functools import reduce
-import subprocess
+import subprocess, io
+
+from PIL import Image, ImagePalette
 
 def iterate_as_type(strings, t):
     return map(t, strings)
@@ -183,6 +185,23 @@ def parse_file(filename):
     with open(filename) as f:
         return parse_lines(f.readlines())
 
-
 def render_preview(commands, outfile):
     subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-f', outfile], input="".join(map(str, commands)).encode('ASCII'))
+
+def image_preview(commands, rewrite_color=(0, 0, 0)):
+    completed = subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-f', '-'], input="".join(map(str, commands)).encode('ASCII'), stdout=subprocess.PIPE)
+    img = Image.open(io.BytesIO(completed.stdout))
+    img.palette.palette = b'\xff\xff\xff' + bytes(rewrite_color) + (b'\x00\x00\x00' * 254)
+    img = img.convert('RGBA')
+    newImage = []
+    for px in img.getdata():
+        if px[:3] == (255, 255, 255):
+            newImage.append((255, 255, 255, 0))
+        else:
+            newImage.append(px)
+    img.putdata(newImage)
+    return img
+
+
+def show_preview(commands, rewrite_color=(0, 0, 0)):
+    image_preview(commands, rewrite_color).show()

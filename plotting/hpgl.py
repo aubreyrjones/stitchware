@@ -4,6 +4,7 @@ Designed to handle CLO3D-specific HPGL outputs.
 
 from itertools import chain
 from functools import reduce
+import subprocess
 
 def iterate_as_type(strings, t):
     return map(t, strings)
@@ -30,6 +31,10 @@ def coord_extents(coords):
 
 def strip_endline(l):
     return l[:-2] if l.endswith(';\n') else l
+
+def flatten_blocks_to_text(blocks: list):
+    return "".join(map(str, blocks))
+
 
 class Statement:
     def __init__(self, line: str):
@@ -125,11 +130,11 @@ class HPGLPlot:
     def __str__(self):
         return "".join(map(str, iter(self)))
     
-    def no_cuttable(self):
+    def cuttable(self):
         return filter(Block.cuttable, self)
 
     def cuttable_repr(self):
-        return "\n".join(map(lambda s: repr(s), self.no_cuttable()))
+        return "\n".join(map(lambda s: repr(s), self.cuttable()))
     
     def extents(self):
         return coord_extents(list(chain(*map(Block.extents, filter(Block.has_trace, self.blocks)))))
@@ -138,6 +143,28 @@ class HPGLPlot:
         bounds = self.extents()
         self.init_statements['IP'].set_args(0, bounds[1][1], bounds[1][0], 0)
         self.init_statements['SC'].set_args(0, 1, 0, -1, 2)
+
+    def find_passes(self):
+        passes = {'init': self.blocks[0], 'coda': self.blocks[-1]}
+        
+        found_uncuttable = False
+        work_passes = [[]]
+        for b in self.blocks[1:-1]:
+            if not b.cuttable(): 
+                found_uncuttable = True
+                continue
+            if found_uncuttable and work_passes[-1]:
+                work_passes.append([])
+                found_uncuttable = False
+            work_passes[-1].append(b)
+        
+        if len(work_passes) == 1:
+            passes['work'] = {'knife': work_passes[0]}
+        else:
+            passes['work'] = {'pen': work_passes[0], 'knife': work_passes[1]}
+        
+        return passes
+
 
 
 def parse_lines(lines):
@@ -155,3 +182,7 @@ def parse_lines(lines):
 def parse_file(filename):
     with open(filename) as f:
         return parse_lines(f.readlines())
+
+
+def render_preview(commands, outfile):
+    subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-f', outfile], input="".join(map(str, commands)).encode('ASCII'))

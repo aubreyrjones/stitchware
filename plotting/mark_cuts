@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+
+import argparse
+from kivy.app import App
+from kivy.uix.widget import Widget
+import kivy.graphics
+import hpgl
+
+
+class PlotCanvas(Widget):
+    def __init__(self, plot, **kwargs):
+        super(PlotCanvas, self).__init__(**kwargs)
+        self.plot = plot
+        self.plot_extents = plot.extents()
+        self.plot_w = self.plot_extents[1][0] - self.plot_extents[0][0]
+        self.plot_h = self.plot_extents[1][1] - self.plot_extents[0][1]
+        self.plot_scale = 1.0
+        self.plot_inv_scale = 1.0
+
+        self.draw_plot()
+        self.bind(size=self.draw_plot)
+    
+    def draw_plot(self, *args):
+        self.plot_scale = self.size[1] / self.plot_h
+        self.plot_inv_scale = 1.0 / self.plot_scale
+        self.canvas.clear()
+        with self.canvas:
+            kivy.graphics.Scale(self.plot_scale, self.plot_scale, 1)
+            for block in self.plot:
+                block_pen = block.get_pen()
+                block_trace = block.trace()
+                if block_trace:
+                    if block_pen == 1:
+                        kivy.graphics.Color(1, 1, 1)
+                    elif block_pen == 2:
+                        kivy.graphics.Color(1, 0, 0)
+                    else:
+                        kivy.graphics.Color(0, 1, 1)
+                    kivy.graphics.Line(points=hpgl.flatten_coords(block_trace))
+    
+    def find_nearest_block(self, scaled_x, scaled_y):
+        best_match, distance = None, 2000
+        for b in self.plot:
+            d = b.distance_to_trace((scaled_x, scaled_y))
+            if d and d < distance:
+                distance = d
+                best_match = b
+        
+        if best_match:
+            cur_pen = best_match.get_pen()
+            best_match.set_pen(1 if cur_pen == 2 else 2)
+
+        self.draw_plot()
+
+    def on_touch_up(self, touch):
+        scaled_x, scaled_y = touch.x * self.plot_inv_scale, touch.y * self.plot_inv_scale
+        self.find_nearest_block(scaled_x, scaled_y)
+        with self.canvas:
+            kivy.graphics.Color(0, 1, 0)
+            kivy.graphics.Ellipse(pos = (scaled_x - 50, scaled_y - 50), size=(100, 100))
+        pass
+
+
+class MarkCutsApp(App):
+    def __init__(self, plot: hpgl.HPGLPlot, **kwargs):
+        self.plot = plot
+        super(MarkCutsApp, self).__init__(**kwargs)
+
+    def build(self):
+        return PlotCanvas(self.plot)
+
+
+def do_main():
+    arg_parser = argparse.ArgumentParser(description="Mark HPGL blocks for cutting vs. plotting.")
+    arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
+    args = arg_parser.parse_args()
+    plot = hpgl.parse_file(args.file)
+    MarkCutsApp(plot).run()
+    print(str(plot))
+
+
+if __name__ == '__main__':
+    do_main()

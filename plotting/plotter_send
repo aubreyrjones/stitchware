@@ -7,6 +7,39 @@ from PIL import Image
 import curtsies
 import hpgl
 
+def prompt_input():
+    with curtsies.Input() as input:
+        for kp in input:
+            if kp in ('y', 'n'):
+                return kp
+            else:
+                print("What?")
+
+def max_image_size(images):
+    maxX = 0
+    maxY = 0
+    for i in images:
+        maxX = max(maxX, i.size[0])
+        maxY = max(maxY, i.size[1])
+    return (maxX, maxY)
+
+def paste_up(img, newsize):
+    retval = Image.new('RGBA', newsize)
+    w, h = newsize
+    ow, oh = img.size
+    x = w - ow
+    y = h - oh
+    retval.paste(img, (0, y))
+    return retval
+
+def composite_all(images):
+    maxsize = max_image_size(images)
+    composited = reduce(Image.alpha_composite, map(lambda i: paste_up(i, maxsize), images))
+    retval = Image.new('RGB', maxsize, color=(255, 255, 255))
+    retval.paste(composited, (0, 0, *maxsize))
+    return retval
+
+
 
 plotter_settings = {
     "titan" : {
@@ -45,37 +78,6 @@ for w in passes['work']:
 
 # Preview passes
 
-def prompt_input():
-    with curtsies.Input() as input:
-        for kp in input:
-            if kp in ('y', 'n'):
-                return kp
-            else:
-                print("What?")
-
-def max_image_size(images):
-    maxX = 0
-    maxY = 0
-    for i in images:
-        maxX = max(maxX, i.size[0])
-        maxY = max(maxY, i.size[1])
-    return (maxX, maxY)
-
-def paste_up(img, newsize):
-    retval = Image.new('RGBA', newsize)
-    w, h = newsize
-    ow, oh = img.size
-    x = w - ow
-    y = h - oh
-    retval.paste(img, (0, y))
-    return retval
-
-def composite_all(images):
-    maxsize = max_image_size(images)
-    composited = reduce(Image.alpha_composite, map(lambda i: paste_up(i, maxsize), images))
-    retval = Image.new('RGB', maxsize, color=(255, 255, 255))
-    retval.paste(composited, (0, 0, *maxsize))
-    return retval
 
 if args.preview:
     

@@ -7,6 +7,7 @@ Config.set('input', 'mouse', 'mouse,disable_multitouch')
 
 from kivy.app import App
 from kivy.uix.widget import Widget
+from kivy.graphics.transformation import Matrix
 import kivy.graphics, kivy.properties, kivy.event
 import hpgl
 
@@ -15,14 +16,23 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
     plot = kivy.properties.ObjectProperty()
     debug_color = kivy.properties.ObjectProperty((1, 1, 1))
     readonly = kivy.properties.BooleanProperty(False)
+    zoom = kivy.properties.NumericProperty(1.0)
+    zoom_x = kivy.properties.NumericProperty(0.0)
+    zoom_y = kivy.properties.NumericProperty(0.0)
+    
+    zoom_xform = kivy.properties.ObjectProperty(Matrix())
+    widget_xform = kivy.properties.ObjectProperty(Matrix())
 
     def __init__(self, **kwargs):
         self.register_event_type('on_update_plot')
         super(PlotCanvas, self).__init__(**kwargs)
         self.bind(plot=self.on_plot_set)
-        self.bind(size=self.draw_plot, plot=self.draw_plot)
+        self.bind(size=self.update_widget_xform, pos=self.update_widget_xform, plot=self.on_plot_set, zoom_xform=self.draw_plot, widget_xform=self.draw_plot)
+        self.bind(zoom=self.update_zoom_xform, zoom_x=self.update_zoom_xform, zoom_y=self.update_zoom_xform)
         self.plot_scale = 1.0
         self.plot_inv_scale = 1.0
+        self.update_widget_xform()
+        self.update_zoom_xform()
     
     def on_update_plot(self, *args):
         self.draw_plot()
@@ -31,66 +41,122 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         self.plot_extents = plot.extents()
         self.plot_w = self.plot_extents[1][0] - self.plot_extents[0][0]
         self.plot_h = self.plot_extents[1][1] - self.plot_extents[0][1]
+
+        self.plot_scale = self.height / self.plot_h
+        self.plot_inv_scale = 1.0 / self.plot_scale
+
+        self.update_widget_xform()
     
+    def update_widget_xform(self, *args):
+        m = Matrix()
+        m.translate(self.pos[0], self.pos[1], 0)
+        m.scale(self.plot_scale, self.plot_scale, 1)
+        #print(self.widget_xform)
+        self.widget_xform = m
+
+    def update_zoom_xform(self, *args):
+        m = Matrix()
+        m.translate(-self.zoom_x, -self.zoom_y, 0)
+        self.zoom_xform = m
+
     def draw_plot(self, *args):
-        #return
         if not self.plot: return
 
-        self.plot_scale = self.size[1] / self.plot_h
+        self.plot_scale = self.height / self.plot_h
         self.plot_inv_scale = 1.0 / self.plot_scale
+
+
         self.canvas.clear()
         with self.canvas:
+            kivy.graphics.ScissorPush(x = self.pos[0], y = self.pos[1], width=self.width, height=self.height)
             kivy.graphics.PushMatrix()
+            # mi = kivy.graphics.MatrixInstruction()
+            # mi.matrix = self.widget_xform
+
             kivy.graphics.Translate(self.pos)
             kivy.graphics.Scale(self.plot_scale, self.plot_scale, 1)
+
+            kivy.graphics.Translate(-self.zoom_x, -self.zoom_y)
+            kivy.graphics.Scale(self.zoom, self.zoom, 1)
+            kivy.graphics.Translate(-self.zoom_x * self.zoom, -self.zoom_y * self.zoom)
             for block in self.plot:
                 block_pen = block.get_pen()
                 block_trace = block.trace()
                 if block_trace:
                     if block_pen == 1:
-                        kivy.graphics.Color(1, 1, 1)
+                        kivy.graphics.Color(1, 1, 1, 0.5)
                     elif block_pen == 2:
-                        kivy.graphics.Color(1, 0, 0)
+                        kivy.graphics.Color(1, 0, 0, 0.5)
                     elif block_pen == 3:
-                        kivy.graphics.Color(0, 1, 1)
+                        kivy.graphics.Color(0, 1, 1, 0.5)
                     else:
-                        kivy.graphics.Color(0, 1, 0)
+                        kivy.graphics.Color(0, 1, 0, 0.5)
                     kivy.graphics.Line(points=hpgl.flatten_coords(block_trace))
             kivy.graphics.PopMatrix()
+            kivy.graphics.ScissorPop()
     
     def find_nearest_block(self, scaled_x, scaled_y):
         if not self.plot: return
 
-        best_match, distance = None, 2000
+        best_matches, distance = [], 200
         for b in self.plot:
             d = b.distance_to_trace((scaled_x, scaled_y))
-            if d and d < distance:
-                distance = d
-                best_match = b
+            if d:
+                if d == distance:
+                    best_matches.append(b)
+                elif d < distance:
+                    distance = d
+                    best_matches = [b]
         
-        # if best_match:
-        #     cur_pen = best_match.get_pen()
-        #     best_match.set_pen(1 if cur_pen == 2 else 2)
+        return best_matches
+
+    def transform_click(self, x, y):
+        local_x, local_y = (x - self.pos[0]) * self.plot_inv_scale, (y - self.pos[1]) * self.plot_inv_scale
+        local_x += self.zoom_x
+        local_y += self.zoom_y
+        return local_x / self.zoom, local_y / self.zoom
         
-        return best_match
+
+    def increment_zoom(self, dir: int):
+        if self.zoom + dir <= 1:
+            self.zoom = 1
+        else:
+            self.zoom += dir
 
     def on_touch_up(self, touch):
+        if not self.collide_point(touch.x, touch.y): return
+
+        if touch.button in ('scrollup', 'scrolldown'):
+            self.increment_zoom(1 if touch.button == 'scrolldown' else -1)
+            if self.zoom != 1:
+                self.zoom_x, self.zoom_y = self.transform_click(touch.x, touch.y)
+            else:
+                self.zoom_x, self.zoom_y = 0, 0
+            return
+
         if self.readonly: return
         if not self.plot: return
-        if not self.collide_point(touch.x, touch.y): return
         
-        scaled_x, scaled_y = (touch.x - self.pos[0]) * self.plot_inv_scale, (touch.y - self.pos[1]) * self.plot_inv_scale
+        scaled_x, scaled_y = self.transform_click(touch.x, touch.y)
         nearest_block = self.find_nearest_block(scaled_x, scaled_y)
+        
         if not nearest_block: return
-
+        
         if touch.button == 'left':
-            cur_pen = nearest_block.get_pen()
-            nearest_block.set_pen(1 if cur_pen == 2 else 2)
+            for nb in nearest_block:
+                cur_pen = nb.get_pen()
+                nb.set_pen(1 if cur_pen != 1 else 2)
+        elif touch.button == 'middle':
+            for nb in nearest_block:
+                cur_pen = nb.get_pen()
+                nb.set_pen(1)
         elif touch.button == 'right':
-            connected = self.plot.connectivity(nearest_block)
+            connected = self.plot.connectivity(nearest_block[0])
             for c in connected:
                 c.set_pen(2)
-
+        else:
+            print(touch.button)
+        
         self.dispatch('on_update_plot')
         
         return True

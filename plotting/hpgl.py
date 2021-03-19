@@ -241,7 +241,7 @@ class HPGLPlot:
         return "\n".join(map(lambda s: repr(s), self.cuttable()))
     
     def extents(self):
-        return coord_extents(list(chain(*map(Block.extents, filter(Block.has_coordinates, self.blocks)))))
+        return coord_extents(list(chain(*map(Block.extents, filter(Block.has_coordinates, self.blocks[1:]))))) # this is just a bandaid, skipping the init
 
     def mirror(self):
         bounds = self.extents()
@@ -277,9 +277,9 @@ def parse_lines(lines):
 
     for l in lines:
         statement = Statement(l)
+        plot.push_statement(statement)
         if statement.command == 'PU' and not statement.tail:
             plot.push_block()
-        plot.push_statement(statement)
     
     return plot
 
@@ -342,10 +342,10 @@ class CutSorter:
 
 def line_to_block(line: shapely.geometry.LineString):
     b = Block()
-    b.push_back(Statement('PU', []))
     b.push_back(Statement('SP', [3 if line.is_ring else 2]))
     b.push_back(Statement('PU', [line.coords[0]]))
     b.push_back(Statement('PD', [c for c in line.coords[1:]]))
+    b.push_back(Statement('PU', []))
     return b
 
 

@@ -65,6 +65,9 @@ chosen_plotter_settings = plotter_settings[args.plotter]
 # Load and transform plot
 plot = hpgl.parse_file(args.file)
 
+print(repr(plot))
+exit(0)
+
 if args.mirror:
     plot.mirror()
 

@@ -1,30 +1,47 @@
 #!/usr/bin/env python3
 
 import argparse
+
+from kivy.config import Config
+Config.set('input', 'mouse', 'mouse,disable_multitouch')
+
 from kivy.app import App
 from kivy.uix.widget import Widget
-import kivy.graphics
+import kivy.graphics, kivy.properties, kivy.event
 import hpgl
 
 
-class PlotCanvas(Widget):
-    def __init__(self, plot, **kwargs):
+class PlotCanvas(Widget, kivy.event.EventDispatcher):
+    plot = kivy.properties.ObjectProperty()
+    debug_color = kivy.properties.ObjectProperty((1, 1, 1))
+    readonly = kivy.properties.BooleanProperty(False)
+
+    def __init__(self, **kwargs):
+        self.register_event_type('on_update_plot')
         super(PlotCanvas, self).__init__(**kwargs)
-        self.plot = plot
+        self.bind(plot=self.on_plot_set)
+        self.bind(size=self.draw_plot, plot=self.draw_plot)
+        self.plot_scale = 1.0
+        self.plot_inv_scale = 1.0
+    
+    def on_update_plot(self, *args):
+        self.draw_plot()
+        
+    def on_plot_set(self, instance, plot):
         self.plot_extents = plot.extents()
         self.plot_w = self.plot_extents[1][0] - self.plot_extents[0][0]
         self.plot_h = self.plot_extents[1][1] - self.plot_extents[0][1]
-        self.plot_scale = 1.0
-        self.plot_inv_scale = 1.0
-
-        self.draw_plot()
-        self.bind(size=self.draw_plot)
     
     def draw_plot(self, *args):
+        #return
+        if not self.plot: return
+
         self.plot_scale = self.size[1] / self.plot_h
         self.plot_inv_scale = 1.0 / self.plot_scale
         self.canvas.clear()
         with self.canvas:
+            kivy.graphics.PushMatrix()
+            kivy.graphics.Translate(self.pos)
             kivy.graphics.Scale(self.plot_scale, self.plot_scale, 1)
             for block in self.plot:
                 block_pen = block.get_pen()
@@ -34,11 +51,16 @@ class PlotCanvas(Widget):
                         kivy.graphics.Color(1, 1, 1)
                     elif block_pen == 2:
                         kivy.graphics.Color(1, 0, 0)
-                    else:
+                    elif block_pen == 3:
                         kivy.graphics.Color(0, 1, 1)
+                    else:
+                        kivy.graphics.Color(0, 1, 0)
                     kivy.graphics.Line(points=hpgl.flatten_coords(block_trace))
+            kivy.graphics.PopMatrix()
     
     def find_nearest_block(self, scaled_x, scaled_y):
+        if not self.plot: return
+
         best_match, distance = None, 2000
         for b in self.plot:
             d = b.distance_to_trace((scaled_x, scaled_y))
@@ -46,20 +68,50 @@ class PlotCanvas(Widget):
                 distance = d
                 best_match = b
         
-        if best_match:
-            cur_pen = best_match.get_pen()
-            best_match.set_pen(1 if cur_pen == 2 else 2)
-
-        self.draw_plot()
+        # if best_match:
+        #     cur_pen = best_match.get_pen()
+        #     best_match.set_pen(1 if cur_pen == 2 else 2)
+        
+        return best_match
 
     def on_touch_up(self, touch):
-        scaled_x, scaled_y = touch.x * self.plot_inv_scale, touch.y * self.plot_inv_scale
-        self.find_nearest_block(scaled_x, scaled_y)
-        with self.canvas:
-            kivy.graphics.Color(0, 1, 0)
-            kivy.graphics.Ellipse(pos = (scaled_x - 50, scaled_y - 50), size=(100, 100))
-        pass
+        if self.readonly: return
+        if not self.plot: return
+        if not self.collide_point(touch.x, touch.y): return
+        
+        scaled_x, scaled_y = (touch.x - self.pos[0]) * self.plot_inv_scale, (touch.y - self.pos[1]) * self.plot_inv_scale
+        nearest_block = self.find_nearest_block(scaled_x, scaled_y)
+        if not nearest_block: return
 
+        if touch.button == 'left':
+            cur_pen = nearest_block.get_pen()
+            nearest_block.set_pen(1 if cur_pen == 2 else 2)
+        elif touch.button == 'right':
+            connected = self.plot.connectivity(nearest_block)
+            for c in connected:
+                c.set_pen(2)
+
+        self.dispatch('on_update_plot')
+        
+        return True
+
+class MainWindow(Widget):
+    orig_plot = kivy.properties.ObjectProperty()
+    opt_plot = kivy.properties.ObjectProperty()
+
+    def __init__(self, **kwargs):
+        super(MainWindow, self).__init__(**kwargs)
+        
+    def set_plot(self, p):
+        self.orig_plot = p
+        self.opt_plot = p.clone()
+
+    def optimize_plot(self):
+        if not self.orig_plot: return
+        self.opt_plot = hpgl.organize_cuts(self.orig_plot.clone())
+
+    # def build(self):
+    #     self.add_widget(PlotCanvas(self.orig_plot))
 
 class MarkCutsApp(App):
     def __init__(self, plot: hpgl.HPGLPlot, **kwargs):
@@ -67,16 +119,18 @@ class MarkCutsApp(App):
         super(MarkCutsApp, self).__init__(**kwargs)
 
     def build(self):
-        return PlotCanvas(self.plot)
+        self.mainwin = MainWindow()
+        self.mainwin.set_plot(self.plot)
+        return self.mainwin # PlotCanvas(self.plot)
 
 
 def do_main():
     arg_parser = argparse.ArgumentParser(description="Mark HPGL blocks for cutting vs. plotting.")
+    arg_parser.add_argument('--out', type=str, help="Output file, otherwise automatically generate name.")
     arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
     args = arg_parser.parse_args()
     plot = hpgl.parse_file(args.file)
     MarkCutsApp(plot).run()
-    print(str(plot))
 
 
 if __name__ == '__main__':

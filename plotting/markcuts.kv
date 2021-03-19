@@ -1,4 +1,37 @@
 #:kivy 2.0.0
 
 <PlotCanvas>:
+    canvas.before:
+        PushMatrix:
+        Translate:
+            xy: root.pos
     canvas:
+        Color:
+            rgb: root.debug_color
+        Rectangle:
+            pos: 0, 0
+            size: root.size
+    canvas.after:
+        PopMatrix:
+
+<MainWindow>:
+    id: main
+    GridLayout:
+        cols: 2
+        size: root.width, root.height * 0.9
+        pos: 0, root.height * 0.05
+        orientation: 'lr-tb'
+
+        PlotCanvas:
+            id: original_plot
+            plot: main.orig_plot
+            debug_color: 1, 0, 0
+            pos_hint: {"left": 0, "top": 1}
+            on_update_plot: main.optimize_plot()
+
+        PlotCanvas:
+            id: optimized_plot
+            plot: main.opt_plot
+            readonly: True
+            debug_color: 0, 0, 1
+            pos_hint: {"right": 1, "top": 1}

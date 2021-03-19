@@ -7,7 +7,19 @@ from functools import reduce
 import subprocess, io
 
 from PIL import Image, ImagePalette
-import shapely, shapely.geometry
+import shapely, shapely.geometry, shapely.ops
+
+
+def extend_line(a, b):
+    if a[-1] == b[0]:
+        return a + b[1:]
+    if b[-1] == a[0]:
+        return b + a[1:]
+    if a[0] == b[0]:
+        return list(reversed(a[1:])) + b
+    if b[-1] == a[-1]:
+        return list(reversed(b[1:])) + a[1:]
+    return None
 
 def iterate_as_type(strings, t):
     return map(t, strings)
@@ -45,14 +57,25 @@ def strip_endline(l):
 def flatten_blocks_to_text(blocks: list):
     return "".join(map(str, blocks))
 
-
 class Statement:
-    def __init__(self, line: str):
+    def __init__(self, line: str, *args):
         self.command = line[:2]
-        self.tail = strip_endline(line[2:])
-        self.split_tail = self.tail.split(',') if self.tail else []
+        self.tail = ''
+        self.split_tail = []
         self.parsed_args = []
-        self._parse_args()
+        if args:
+            if type(args[0]) is list:
+                self.set_args(*args[0])
+            else:
+                self.set_args(*args)
+        else:
+            self.tail = strip_endline(line[2:])
+            self.split_tail = self.tail.split(',') if self.tail else []
+            self.parsed_args = []
+            self._parse_args()
+    
+    def clone(self):
+        return Statement(str(self))
     
     def _parse_args(self):
         if not self.split_tail: return
@@ -83,13 +106,20 @@ class Statement:
 
     def rewrite(self):
         if not self.parsed_args: return
-        self.split_tail = [str(a) for a in self.parsed_args]
+        if self.needs_coordinates():
+            self.split_tail = [str(a) for a in flatten_coords(self.parsed_args)]
+        else:
+            self.split_tail = [str(a) for a in self.parsed_args]
         self.tail = ','.join(self.split_tail)
-
 
 class Block:
     def __init__(self):
         self.commands = []
+    
+    def clone(self):
+        o = Block()
+        o.commands = [c.clone() for c in self.commands]
+        return o
     
     def push_back(self, statement):
         self.commands.append(statement)
@@ -140,18 +170,39 @@ class Block:
                 block_trace.extend(cmd.parsed_args)
         return block_trace
 
+    def linestring(self):
+        if not self.has_trace(): return None
+        return shapely.geometry.LineString([shapely.geometry.Point(p) for p in self.trace()])
+
     def distance_to_trace(self, point: tuple):
         if not self.has_trace(): return 2**31
         query_point = shapely.geometry.Point(*point)
-        trace_string = shapely.geometry.LineString(self.trace())
+        trace_string = self.linestring()
         distance = trace_string.distance(query_point)
         return distance
+    
+    def connects_to(self, other_trace: list, retval=[]):
+        if not self.has_trace(): return False
+        if extend_line(self.trace(), other_trace):
+            return True
+        return False
 
 class HPGLPlot:
     def __init__(self):
         self.blocks = []
         self.init_statements = {}
     
+    def clone(self):
+        o = HPGLPlot()
+        o.blocks = [b.clone() for b in self.blocks]
+        o.find_inits()
+        return o
+    
+    def find_inits(self):
+        for statement in self.linear():
+            if statement.command in ('IP', 'SC'):
+                self.init_statements[statement.command] = statement        
+
     def push_block(self):
         self.blocks.append(Block())
     
@@ -162,6 +213,14 @@ class HPGLPlot:
 
     def last_block(self):
         return self.blocks[-1]
+
+    def connectivity(self, block, retval=list()):
+        retval.append(block)
+        for b in self:
+            if b in retval: continue
+            if b.connects_to(block.trace(), retval):
+                self.connectivity(b, retval)
+        return retval
 
     def __iter__(self):
         return iter(self.blocks)
@@ -248,3 +307,64 @@ def image_preview(commands, rewrite_color=(0, 0, 0)):
 
 def show_preview(commands, rewrite_color=(0, 0, 0)):
     image_preview(commands, rewrite_color).show()
+
+class CutSorter:
+    def __init__(self):
+        self.ends = {}
+        self.rings = []
+    
+    def add_unconnected(self, line: shapely.geometry.LineString):
+        if not line: return
+
+        if line.is_ring:
+            self.rings.append(line)
+            return
+        
+        for c in (line.coords[0], line.coords[-1]):
+            if c in self.ends:
+                o = self.ends[c]
+                if c is o:
+                    print("Self intersection")
+                    continue
+                extended = extend_line(list(line.coords), list(o.coords))
+                merged_line = shapely.geometry.LineString(coordinates=extended)
+                start, end = o.coords[0], o.coords[-1]
+                if start in self.ends: del self.ends[start]
+                if end in self.ends: del self.ends[end]
+                self.add_unconnected(merged_line)
+                return
+        
+        for c in (line.coords[0], line.coords[-1]):
+                self.ends[c] = line
+    
+    def get_cuts(self):
+        return chain(self.rings, set(self.ends.values()))
+
+def line_to_block(line: shapely.geometry.LineString):
+    b = Block()
+    b.push_back(Statement('PU', []))
+    b.push_back(Statement('SP', [3 if line.is_ring else 2]))
+    b.push_back(Statement('PU', [line.coords[0]]))
+    b.push_back(Statement('PD', [c for c in line.coords[1:]]))
+    return b
+
+
+def organize_cuts(plot):
+    sorter = CutSorter()
+    for b in plot.blocks[:]:
+        trace = b.linestring()
+        if trace and b.get_pen() == 2:
+            plot.blocks.remove(b)
+            sorter.add_unconnected(trace)
+
+    for r in sorter.rings:
+        plot.blocks.append(line_to_block(r))
+    
+    seen = []
+    for l in sorter.ends.values():
+        if l in seen: continue
+        seen.append(l)
+        plot.blocks.append(line_to_block(l))
+    return plot
+        
+

@@ -9,6 +9,5 @@ arg_parser.add_argument('file', type=str)
 args = arg_parser.parse_args()
 
 plot = hpgl.parse_file(args.file)
-plot.mirror()
 
-print(str(plot))
+print(repr(plot))

@@ -107,7 +107,7 @@ class Statement:
     def rewrite(self):
         if not self.parsed_args: return
         if self.needs_coordinates():
-            self.split_tail = [str(a) for a in flatten_coords(self.parsed_args)]
+            self.split_tail = [str(int(a)) for a in flatten_coords(self.parsed_args)]
         else:
             self.split_tail = [str(a) for a in self.parsed_args]
         self.tail = ','.join(self.split_tail)
@@ -115,7 +115,7 @@ class Statement:
 class Block:
     def __init__(self):
         self.commands = []
-        self.jitter = (random.randrange(200), random.randrange(200))
+        self.jitter = (random.uniform(-100, 100), random.uniform(-100, 100))
     
     def clone(self):
         o = Block()
@@ -149,6 +149,12 @@ class Block:
     
     def extents(self):
         return coord_extents(list(chain(*map(lambda s: s.parsed_args, filter(Statement.needs_coordinates, self.commands)))))
+
+    def has_statement(self, *args):
+        for s in self:
+            if s.command in args:
+                return True
+        return False
 
     def get_pen(self):
         for s in self:
@@ -276,7 +282,6 @@ class HPGLPlot:
         return passes
 
 
-
 def parse_lines(lines):
     plot = HPGLPlot()
     plot.push_block()
@@ -286,7 +291,10 @@ def parse_lines(lines):
         plot.push_statement(statement)
         if statement.command == 'PU' and not statement.tail:
             plot.push_block()
-    
+
+    if plot.blocks[-1].has_statement('IN', 'PG'):
+        plot.blocks.pop(-1)
+
     return plot
 
 def parse_file(filename):

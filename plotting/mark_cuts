@@ -10,7 +10,7 @@ from kivy.uix.widget import Widget
 from kivy.graphics.transformation import Matrix
 from kivy.core.window import Window
 import kivy.graphics, kivy.properties, kivy.event
-import random, time
+import random, time, os.path
 import hpgl
 
 random.seed(time.time())
@@ -34,7 +34,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         self.bind(plot=self.on_update_plot)
         self.bind(size=self.draw_plot, pos=self.draw_plot, plot=self.draw_plot, zoom_xform=self.draw_plot)
         Window.bind(on_key_down=self.on_key_down)
-        Window.bind(on_key_up=self.on_key_up)        
+        Window.bind(on_key_up=self.on_key_up)
         self.move_mode = False
         self.plot_scale = 1.0
         self.plot_inv_scale = 1.0
@@ -199,27 +199,38 @@ class MainWindow(Widget):
     orig_plot = kivy.properties.ObjectProperty()
     opt_plot = kivy.properties.ObjectProperty()
 
-    def __init__(self, **kwargs):
+    def __init__(self, outfile, **kwargs):
         super(MainWindow, self).__init__(**kwargs)
+        Window.bind(on_key_up=self.on_key_up)
+        self.outfile = outfile
         
     def set_plot(self, p):
-        self.orig_plot = p
+        self.orig_plot = p.clone()
         self.opt_plot = p.clone()
 
     def optimize_plot(self):
         if not self.orig_plot: return
         self.opt_plot = hpgl.organize_cuts(self.orig_plot.clone())
+        self.write_out()
 
-    # def build(self):
-    #     self.add_widget(PlotCanvas(self.orig_plot))
+    def on_key_up(self, *args):
+        print(args)
+        if args[1] == 115:
+            self.set_plot(self.opt_plot)
+    
+    def write_out(self):
+        if not self.opt_plot: return
+        with open(self.outfile, 'w') as f:
+            f.write(str(self.opt_plot))
 
 class MarkCutsApp(App):
-    def __init__(self, plot: hpgl.HPGLPlot, **kwargs):
+    def __init__(self, plot: hpgl.HPGLPlot, outfile, **kwargs):
         self.plot = plot
+        self.outfile = outfile
         super(MarkCutsApp, self).__init__(**kwargs)
 
     def build(self):
-        self.mainwin = MainWindow()
+        self.mainwin = MainWindow(self.outfile)
         self.mainwin.set_plot(self.plot)
         return self.mainwin # PlotCanvas(self.plot)
 
@@ -230,7 +241,10 @@ def do_main():
     arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
     args = arg_parser.parse_args()
     plot = hpgl.parse_file(args.file)
-    MarkCutsApp(plot).run()
+
+    outfile = os.path.splitext(args.file)[0] + "-preprocessed.plt"
+
+    MarkCutsApp(plot, outfile).run()
 
 
 if __name__ == '__main__':

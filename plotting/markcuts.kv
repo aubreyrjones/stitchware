@@ -1,18 +1,12 @@
 #:kivy 2.0.0
 
 <PlotCanvas>:
-    canvas.before:
-        PushMatrix:
-        Translate:
-            xy: root.pos
     canvas:
         Color:
             rgb: root.debug_color
         Rectangle:
-            pos: 0, 0
+            pos: root.pos
             size: root.size
-    canvas.after:
-        PopMatrix:
 
 <MainWindow>:
     id: main

@@ -214,7 +214,9 @@ class HPGLPlot:
     def last_block(self):
         return self.blocks[-1]
 
-    def connectivity(self, block, retval=list()):
+    def connectivity(self, block, retval=None):
+        if not retval:
+            retval = []
         retval.append(block)
         for b in self:
             if b in retval: continue

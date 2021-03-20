@@ -8,6 +8,7 @@ Config.set('input', 'mouse', 'mouse,disable_multitouch')
 from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.graphics.transformation import Matrix
+from kivy.core.window import Window
 import kivy.graphics, kivy.properties, kivy.event
 import hpgl
 
@@ -16,69 +17,62 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
     plot = kivy.properties.ObjectProperty()
     debug_color = kivy.properties.ObjectProperty((1, 1, 1))
     readonly = kivy.properties.BooleanProperty(False)
-    zoom = kivy.properties.NumericProperty(1.0)
-    zoom_x = kivy.properties.NumericProperty(0.0)
-    zoom_y = kivy.properties.NumericProperty(0.0)
     
     zoom_xform = kivy.properties.ObjectProperty(Matrix())
     widget_xform = kivy.properties.ObjectProperty(Matrix())
 
+    vx = kivy.properties.NumericProperty(0)
+    vy = kivy.properties.NumericProperty(0)
+    
     def __init__(self, **kwargs):
         self.register_event_type('on_update_plot')
         super(PlotCanvas, self).__init__(**kwargs)
-        self.bind(plot=self.on_plot_set)
-        self.bind(size=self.update_widget_xform, pos=self.update_widget_xform, plot=self.on_plot_set, zoom_xform=self.draw_plot, widget_xform=self.draw_plot)
-        self.bind(zoom=self.update_zoom_xform, zoom_x=self.update_zoom_xform, zoom_y=self.update_zoom_xform)
+        self.bind(size=self.update_ratio)
+        self.bind(size=self.update_widget_xform, pos=self.update_widget_xform)
+        self.bind(plot=self.on_update_plot)
+        self.bind(size=self.draw_plot, pos=self.draw_plot, plot=self.draw_plot, zoom_xform=self.draw_plot)
+        Window.bind(on_key_down=self.on_key_down)
+        Window.bind(on_key_up=self.on_key_up)        
+        self.move_mode = False
         self.plot_scale = 1.0
         self.plot_inv_scale = 1.0
+        self.zoom = 1
         self.update_widget_xform()
-        self.update_zoom_xform()
+        self.increment_zoom(-1, (0, 0))
+        self.drag_start = None
+        self.drag_start_view = None
     
     def on_update_plot(self, *args):
         self.draw_plot()
+
+    def update_ratio(self, *args):
+        if not self.plot:
+            self.plot_scale = 1.0
+            self.plot_inv_scale = 1.0
+            return
         
-    def on_plot_set(self, instance, plot):
-        self.plot_extents = plot.extents()
-        self.plot_w = self.plot_extents[1][0] - self.plot_extents[0][0]
-        self.plot_h = self.plot_extents[1][1] - self.plot_extents[0][1]
-
-        self.plot_scale = self.height / self.plot_h
+        plot_extents = self.plot.extents()
+        plot_h = plot_extents[1][1] - plot_extents[0][1]
+        self.plot_scale = (self.height - 20) / plot_h
         self.plot_inv_scale = 1.0 / self.plot_scale
-
-        self.update_widget_xform()
     
     def update_widget_xform(self, *args):
         m = Matrix()
         m.translate(self.pos[0], self.pos[1], 0)
         m.scale(self.plot_scale, self.plot_scale, 1)
-        #print(self.widget_xform)
         self.widget_xform = m
-
-    def update_zoom_xform(self, *args):
-        m = Matrix()
-        m.translate(-self.zoom_x, -self.zoom_y, 0)
-        self.zoom_xform = m
 
     def draw_plot(self, *args):
         if not self.plot: return
-
-        self.plot_scale = self.height / self.plot_h
-        self.plot_inv_scale = 1.0 / self.plot_scale
-
 
         self.canvas.clear()
         with self.canvas:
             kivy.graphics.ScissorPush(x = self.pos[0], y = self.pos[1], width=self.width, height=self.height)
             kivy.graphics.PushMatrix()
-            # mi = kivy.graphics.MatrixInstruction()
-            # mi.matrix = self.widget_xform
 
-            kivy.graphics.Translate(self.pos)
-            kivy.graphics.Scale(self.plot_scale, self.plot_scale, 1)
+            mi = kivy.graphics.MatrixInstruction()
+            mi.matrix = self.widget_xform.multiply(Matrix().translate(self.vx, self.vy, 0)).multiply(self.zoom_xform)
 
-            kivy.graphics.Translate(-self.zoom_x, -self.zoom_y)
-            kivy.graphics.Scale(self.zoom, self.zoom, 1)
-            kivy.graphics.Translate(-self.zoom_x * self.zoom, -self.zoom_y * self.zoom)
             for block in self.plot:
                 block_pen = block.get_pen()
                 block_trace = block.trace()
@@ -92,6 +86,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
                     else:
                         kivy.graphics.Color(0, 1, 0, 0.5)
                     kivy.graphics.Line(points=hpgl.flatten_coords(block_trace))
+
             kivy.graphics.PopMatrix()
             kivy.graphics.ScissorPop()
     
@@ -110,28 +105,63 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         
         return best_matches
 
-    def transform_click(self, x, y):
-        local_x, local_y = (x - self.pos[0]) * self.plot_inv_scale, (y - self.pos[1]) * self.plot_inv_scale
-        local_x += self.zoom_x
-        local_y += self.zoom_y
-        return local_x / self.zoom, local_y / self.zoom
-        
+    def transform_click(self, x, y, xform=None):
+        click_xform = xform or (self.widget_xform.multiply(Matrix().translate(self.vx, self.vy, 0)).multiply(self.zoom_xform).inverse())
+        plot_click = click_xform.transform_point(x, y, 0)
 
-    def increment_zoom(self, dir: int):
+        return plot_click[0], plot_click[1]
+
+    def calc_zoom_xform(self, zoom, zoom_origin):
+        m = Matrix()
+        m = m.multiply(Matrix().scale(zoom, zoom, 1))
+
+        return m
+
+
+    def increment_zoom(self, dir: int, orig: tuple):
         if self.zoom + dir <= 1:
             self.zoom = 1
+            self.zoom_xform = Matrix()
+            self.vx = 0
+            self.vy = 0
         else:
             self.zoom += dir
+            self.zoom_xform = self.calc_zoom_xform(self.zoom, orig)
+
+    def on_key_down(self, *args):
+        keycode = args[1]
+        if keycode == 304:
+            self.move_mode = True
+
+    def on_key_up(self, *args):
+        keycode = args[1]
+        if keycode == 304:
+            self.move_mode = False
+
+    def on_touch_move(self, touch):
+        if not self.collide_point(touch.x, touch.y): return
+        if not self.move_mode:
+            self.move_mode = True
+            self.drag_start = touch.x, touch.y
+            self.drag_start_view = self.vx, self.vy
+            return
+        self.vx = self.drag_start_view[0] + (touch.x - self.drag_start[0]) * self.plot_inv_scale
+        self.vy = self.drag_start_view[1] + (touch.y - self.drag_start[1]) * self.plot_inv_scale
+        self.draw_plot()
+
+    def on_touch_down(self, touch):
+        pass
 
     def on_touch_up(self, touch):
+        if self.move_mode:
+            self.move_mode = False
+            self.drag_start = None
+            return
+        
         if not self.collide_point(touch.x, touch.y): return
 
         if touch.button in ('scrollup', 'scrolldown'):
-            self.increment_zoom(1 if touch.button == 'scrolldown' else -1)
-            if self.zoom != 1:
-                self.zoom_x, self.zoom_y = self.transform_click(touch.x, touch.y)
-            else:
-                self.zoom_x, self.zoom_y = 0, 0
+            self.increment_zoom(1 if touch.button == 'scrolldown' else -1, (touch.x, touch.y))
             return
 
         if self.readonly: return

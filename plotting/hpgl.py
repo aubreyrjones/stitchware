@@ -8,7 +8,7 @@ import subprocess, io
 
 from PIL import Image, ImagePalette
 import shapely, shapely.geometry, shapely.ops
-import random
+import random, math
 
 def extend_line(a, b):
     if a[-1] == b[0]:
@@ -56,6 +56,15 @@ def strip_endline(l):
 
 def flatten_blocks_to_text(blocks: list):
     return "".join(map(str, blocks))
+
+def vector_length(seq):
+    nsq = sum(map(lambda s: s * s, seq))
+    return math.sqrt(nsq)
+
+def vector_normalize(seq, xfactor=1.0):
+    l = xfactor / vector_length(seq)
+    return type(seq)([s * l for s in seq])
+
 
 class Statement:
     def __init__(self, line: str, *args):
@@ -112,10 +121,11 @@ class Statement:
             self.split_tail = [str(a) for a in self.parsed_args]
         self.tail = ','.join(self.split_tail)
 
+
 class Block:
     def __init__(self):
         self.commands = []
-        self.jitter = (random.uniform(-100, 100), random.uniform(-100, 100))
+        self.jitter = vector_normalize((random.uniform(-1, 1), random.uniform(-1, 1)), random.uniform(50, 150))
     
     def clone(self):
         o = Block()
@@ -261,23 +271,16 @@ class HPGLPlot:
         self.init_statements['SC'].set_args(0, 1, 0, -1, 2)
 
     def find_passes(self):
-        passes = {'init': self.blocks[0], 'coda': self.blocks[-1]}
+        passes = {'init': [self.blocks[0]], 'pen': [], 'knife': []}
         
         found_uncuttable = False
-        work_passes = [[]]
         for b in self.blocks[1:-1]:
             if not b.cuttable(): 
-                found_uncuttable = True
                 continue
-            if found_uncuttable and work_passes[-1]:
-                work_passes.append([])
-                found_uncuttable = False
-            work_passes[-1].append(b)
-        
-        if len(work_passes) == 1:
-            passes['work'] = {'knife': work_passes[0]}
-        else:
-            passes['work'] = {'pen': work_passes[0], 'knife': work_passes[1]}
+            if b.get_pen() == 1:
+                passes['pen'].append(b)
+            elif b.get_pen() in (2, 3):
+                passes['knife'].append(b)
         
         return passes
 
@@ -304,10 +307,9 @@ def parse_file(filename):
 def render_preview(commands, outfile):
     subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-f', outfile], input="".join(map(str, commands)).encode('ASCII'))
 
-def image_preview(commands, rewrite_color=(0, 0, 0)):
-    completed = subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-f', '-'], input="".join(map(str, commands)).encode('ASCII'), stdout=subprocess.PIPE)
+def image_preview(commands):
+    completed = subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-c', '124', '-f', '-'], input="".join(map(str, commands)).encode('ASCII'), stdout=subprocess.PIPE)
     img = Image.open(io.BytesIO(completed.stdout))
-    img.palette.palette = b'\xff\xff\xff' + bytes(rewrite_color) + (b'\x00\x00\x00' * 254)
     img = img.convert('RGBA')
     newImage = []
     for px in img.getdata():
@@ -319,7 +321,7 @@ def image_preview(commands, rewrite_color=(0, 0, 0)):
     return img
 
 
-def show_preview(commands, rewrite_color=(0, 0, 0)):
+def show_preview(commands):
     image_preview(commands, rewrite_color).show()
 
 class CutSorter:
@@ -352,7 +354,6 @@ class CutSorter:
                 return
         
         for c in (line.coords[0], line.coords[-1]):
-            print("end")
             self.ends[c] = line
     
     def get_cuts(self):
@@ -379,7 +380,6 @@ def organize_cuts(plot):
     print(f"Optimizing {intake_count} cut blocks.")
 
     for r in sorter.rings:
-        print(list(r.coords))
         plot.blocks.append(line_to_block(r))
     print(f"Added {len(sorter.rings)} rings.")
     

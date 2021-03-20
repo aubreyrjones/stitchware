@@ -36,7 +36,9 @@ assuredly not cross-platform, as they work with serial ports in a
 naively unix-centric way.
 
 If a script errors out trying to find a package, use `pip3` to satisfy
-the dependency.
+the dependency. You may need to add `-dev` packages from your system's
+package manager in order to satisfy some build requirements for
+the Kivy UI library used in `mark_cuts` and other graphical tools.
 
 If you have no idea what I'm talking about and can't find out with
 google, I'm afraid these tools are probably not friendly enough for

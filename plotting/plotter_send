@@ -39,10 +39,8 @@ def composite_all(images):
     retval.paste(composited, (0, 0, *maxsize))
     return retval
 
-
-
 plotter_settings = {
-    "titan" : {
+    "titan3" : {
         "baudrate": 38400,
         "xonxoff": True,
         "stopbits":serial.STOPBITS_ONE
@@ -50,11 +48,12 @@ plotter_settings = {
 }
 
 arg_parser = argparse.ArgumentParser(description="Send an HPGL file to a plotter.")
-arg_parser.add_argument('--plotter', default='titan', choices=sorted(plotter_settings.keys()), type=str, help="choose plotter settings.")
+arg_parser.add_argument('--plotter', default='titan3', choices=sorted(plotter_settings.keys()), type=str, help="choose plotter settings.")
 arg_parser.add_argument('--dry-run', default=False, const=True, action='store_const', help="Print output to stdout instead of a serial port.")
 arg_parser.add_argument('--preview', default=False, const=True, action='store_const', help="Render preview(s) of the plot.")
 arg_parser.add_argument('--mirror', default=False, const=True, action='store_const', help="Mirror the plot by flipping on the Y axis.")
-arg_parser.add_argument('--separate', default=False, const=True, action='store_const', help="Attempts to separate pen from knife lines.")
+arg_parser.add_argument('--draw', default=False, const=True, action='store_const', help="Send the pen pass.")
+arg_parser.add_argument('--cut', default=False, const=True, action='store_const', help="Send the cutting pass.")
 arg_parser.add_argument('--repeat', type=int, help="Repeat the pattern REPEAT times.")
 arg_parser.add_argument('port', type=str, help="The serial port the plotter is connected to.")
 arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
@@ -65,40 +64,53 @@ chosen_plotter_settings = plotter_settings[args.plotter]
 # Load and transform plot
 plot = hpgl.parse_file(args.file)
 
-print(repr(plot))
-exit(0)
-
 if args.mirror:
     plot.mirror()
 
-
 # Render passes
 passes = plot.find_passes()
-work_passes = {}
-
-for w in passes['work']:
-    work_passes[w] = hpgl.flatten_blocks_to_text(chain(passes['init'], passes['work'][w]))
-
-# Preview passes
-
 
 if args.preview:
-    
     images = []
 
-    images.append(hpgl.image_preview(work_passes['knife'], (255, 0, 0)))
-    if 'pen' in work_passes:
-        images.append(hpgl.image_preview(work_passes['pen'], (0, 0, 255)))
+    images.append(hpgl.image_preview(passes['init'] + passes['knife']))
+    images.append(hpgl.image_preview(passes['init'] + passes['pen']))
 
     composited = composite_all(images)
     composited.show()
 
     print("Do those look good? (y/n)")
     if prompt_input() == 'n':
-        exit(1)
+        exit(0)
+
+if args.repeat:
+    repeated = []
+    for b in passes['knife']:
+        for i in range(args.repeat):
+            repeated.append(b)
+    passes['knife'] = repeated
+
+if not (args.draw or args.cut):
+    print("Neither --cut nor --draw specified. Exiting.")
+    exit(0)
 
 # Open output
 out_port = sys.stdout if args.dry_run else serial.Serial(port=args.port, **chosen_plotter_settings)
 
 # Plot passes
-out_port.write(str(plot))
+def write_pass(p):
+    out_port.write("".join([str(b) for b in p]))
+
+write_pass(passes['init'])
+
+if args.draw:
+    write_pass(passes['pen'])
+
+if args.draw and args.cut:
+    while True:
+        response = input("Have you inserted the knife? (type 'yes' and hit ENTER)")
+        if response == 'yes':
+            break
+
+if args.cut:
+    write_pass(passes['knife'])

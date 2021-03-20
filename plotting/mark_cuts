@@ -38,7 +38,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         self.move_mode = False
         self.plot_scale = 1.0
         self.plot_inv_scale = 1.0
-        self.zoom = 1
+        self.zoom = 1.0
         self.update_widget_xform()
         self.increment_zoom(-1, (0, 0))
         self.drag_start = None
@@ -68,14 +68,18 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
     def draw_plot(self, *args):
         if not self.plot: return
 
+        self.canvas.before.clear()
         self.canvas.clear()
-        with self.canvas:
+        self.canvas.after.clear()
+
+        with self.canvas.before:
             kivy.graphics.ScissorPush(x = self.pos[0], y = self.pos[1], width=self.width, height=self.height)
             kivy.graphics.PushMatrix()
 
             mi = kivy.graphics.MatrixInstruction()
             mi.matrix = self.widget_xform.multiply(Matrix().translate(self.vx, self.vy, 0)).multiply(self.zoom_xform)
 
+        with self.canvas:
             for block in self.plot:
                 block_pen = block.get_pen()
                 block_trace = block.trace(self.jitter_blocks)
@@ -88,8 +92,11 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
                         kivy.graphics.Color(0, 1, 1, 0.5)
                     else:
                         kivy.graphics.Color(0, 1, 0, 0.5)
-                    kivy.graphics.Line(points=hpgl.flatten_coords(block_trace))
+                    flat_coords = hpgl.flatten_coords(block_trace)
+                    kivy.graphics.Line(points=flat_coords, width=1.0)
+                    kivy.graphics.Line(points=flat_coords, width=8.0)
 
+        with self.canvas.after:
             kivy.graphics.PopMatrix()
             kivy.graphics.ScissorPop()
     
@@ -117,7 +124,6 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
     def calc_zoom_xform(self, zoom, zoom_origin):
         m = Matrix()
         m = m.multiply(Matrix().scale(zoom, zoom, 1))
-
         return m
 
     def increment_zoom(self, dir: int, orig: tuple):
@@ -127,8 +133,15 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
             self.vx = 0
             self.vy = 0
         else:
+            start_point = self.transform_click(*orig)
             self.zoom += dir
-            self.zoom_xform = self.calc_zoom_xform(self.zoom, orig)
+            new_zoom_matrix = self.calc_zoom_xform(self.zoom, orig)
+
+            end_point = self.transform_click(*orig, xform=self.widget_xform.multiply(Matrix().translate(self.vx, self.vy, 0)).multiply(new_zoom_matrix).inverse())
+            off_x, off_y = start_point[0] - end_point[0], start_point[1] - end_point[1]
+            self.vx, self.vy = self.vx - (off_x * self.zoom), self.vy - (off_y * self.zoom) #I have clearly screwed up my math somewhere to need the `self.zoom` factor
+
+            self.zoom_xform = new_zoom_matrix            
 
     def on_key_down(self, *args):
         keycode = args[1]

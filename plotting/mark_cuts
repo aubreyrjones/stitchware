@@ -117,7 +117,6 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
 
         return m
 
-
     def increment_zoom(self, dir: int, orig: tuple):
         if self.zoom + dir <= 1:
             self.zoom = 1

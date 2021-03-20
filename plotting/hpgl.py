@@ -8,7 +8,7 @@ import subprocess, io
 
 from PIL import Image, ImagePalette
 import shapely, shapely.geometry, shapely.ops
-
+import random
 
 def extend_line(a, b):
     if a[-1] == b[0]:
@@ -16,9 +16,9 @@ def extend_line(a, b):
     if b[-1] == a[0]:
         return b + a[1:]
     if a[0] == b[0]:
-        return list(reversed(a[1:])) + b
-    if b[-1] == a[-1]:
-        return list(reversed(b[1:])) + a[1:]
+        return list(reversed(a)) + b[1:]
+    if a[-1] == b[-1]:
+        return a[:-1] + list(reversed(b))
     return None
 
 def iterate_as_type(strings, t):
@@ -115,10 +115,12 @@ class Statement:
 class Block:
     def __init__(self):
         self.commands = []
+        self.jitter = (random.randrange(200), random.randrange(200))
     
     def clone(self):
         o = Block()
         o.commands = [c.clone() for c in self.commands]
+        o.jitter = self.jitter
         return o
     
     def push_back(self, statement):
@@ -160,7 +162,7 @@ class Block:
                 s.set_args(pen_number)
                 break
 
-    def trace(self):
+    def trace(self, do_jitter=False):
         if not self.has_trace(): return None
         block_trace = []
         for cmd in self:
@@ -168,16 +170,18 @@ class Block:
                 block_trace.append(cmd.parsed_args[0])
             if cmd.command == 'PD':
                 block_trace.extend(cmd.parsed_args)
+        if do_jitter:
+            block_trace = [(x + self.jitter[0], y + self.jitter[1]) for x, y in block_trace]
         return block_trace
 
-    def linestring(self):
+    def linestring(self, do_jitter=False):
         if not self.has_trace(): return None
-        return shapely.geometry.LineString([shapely.geometry.Point(p) for p in self.trace()])
+        return shapely.geometry.LineString([shapely.geometry.Point(p) for p in self.trace(do_jitter)])
 
-    def distance_to_trace(self, point: tuple):
+    def distance_to_trace(self, point: tuple, do_jitter=False):
         if not self.has_trace(): return 2**31
         query_point = shapely.geometry.Point(*point)
-        trace_string = self.linestring()
+        trace_string = self.linestring(do_jitter)
         distance = trace_string.distance(query_point)
         return distance
     
@@ -316,9 +320,12 @@ class CutSorter:
         self.rings = []
     
     def add_unconnected(self, line: shapely.geometry.LineString):
-        if not line: return
+        if not line: 
+            print("Ummm, that's not a line.")
+            return
 
-        if line.is_ring:
+        if line.is_ring:# and line.is_closed:
+            print("Inserted ring.")
             self.rings.append(line)
             return
         
@@ -337,7 +344,8 @@ class CutSorter:
                 return
         
         for c in (line.coords[0], line.coords[-1]):
-                self.ends[c] = line
+            print("end")
+            self.ends[c] = line
     
     def get_cuts(self):
         return chain(self.rings, set(self.ends.values()))
@@ -353,20 +361,26 @@ def line_to_block(line: shapely.geometry.LineString):
 
 def organize_cuts(plot):
     sorter = CutSorter()
+    intake_count = 0
     for b in plot.blocks[:]:
         trace = b.linestring()
         if trace and b.get_pen() == 2:
             plot.blocks.remove(b)
             sorter.add_unconnected(trace)
+            intake_count += 1
+    print(f"Optimizing {intake_count} cut blocks.")
 
     for r in sorter.rings:
+        print(list(r.coords))
         plot.blocks.append(line_to_block(r))
+    print(f"Added {len(sorter.rings)} rings.")
     
     seen = []
     for l in sorter.ends.values():
         if l in seen: continue
         seen.append(l)
         plot.blocks.append(line_to_block(l))
+    print(f"Added {len(seen)} non-rings.")
     return plot
         
 

@@ -10,8 +10,10 @@ from kivy.uix.widget import Widget
 from kivy.graphics.transformation import Matrix
 from kivy.core.window import Window
 import kivy.graphics, kivy.properties, kivy.event
+import random, time
 import hpgl
 
+random.seed(time.time())
 
 class PlotCanvas(Widget, kivy.event.EventDispatcher):
     plot = kivy.properties.ObjectProperty()
@@ -41,6 +43,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         self.increment_zoom(-1, (0, 0))
         self.drag_start = None
         self.drag_start_view = None
+        self.jitter_blocks = False
     
     def on_update_plot(self, *args):
         self.draw_plot()
@@ -75,7 +78,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
 
             for block in self.plot:
                 block_pen = block.get_pen()
-                block_trace = block.trace()
+                block_trace = block.trace(self.jitter_blocks)
                 if block_trace:
                     if block_pen == 1:
                         kivy.graphics.Color(1, 1, 1, 0.5)
@@ -95,7 +98,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
 
         best_matches, distance = [], 200
         for b in self.plot:
-            d = b.distance_to_trace((scaled_x, scaled_y))
+            d = b.distance_to_trace((scaled_x, scaled_y), self.jitter_blocks)
             if d:
                 if d == distance:
                     best_matches.append(b)
@@ -130,12 +133,14 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
     def on_key_down(self, *args):
         keycode = args[1]
         if keycode == 304:
-            self.move_mode = True
+            self.jitter_blocks = True
+            self.draw_plot()
 
     def on_key_up(self, *args):
         keycode = args[1]
         if keycode == 304:
-            self.move_mode = False
+            self.jitter_blocks = False
+            self.draw_plot()
 
     def on_touch_move(self, touch):
         if not self.collide_point(touch.x, touch.y): return

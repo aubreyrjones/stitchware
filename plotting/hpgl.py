@@ -126,7 +126,18 @@ class Block:
     def __init__(self):
         self.commands = []
         self.jitter = vector_normalize((random.uniform(-1, 1), random.uniform(-1, 1)), random.uniform(50, 150))
-    
+
+    # def __lt__(self, o):
+    #     if self.has_statement('IN'):
+    #         return not o.has_statement('IN')
+    #     elif o.has_statement('IN'): return False
+            
+    #     my_extents = self.extents()
+    #     o_extents = o.extents()
+    #     if my_extents[0] == o_extents[0]:
+    #         return my_extents[1] < o_extents[1]
+    #     return my_extents[0] < o_extents[0]
+
     def clone(self):
         o = Block()
         o.commands = [c.clone() for c in self.commands]
@@ -206,6 +217,10 @@ class Block:
         if extend_line(self.trace(), other_trace):
             return True
         return False
+    
+    def geometric_sort_key(self):
+        if self.has_statement('IN') or not self.has_trace(): return -2**32
+        return self.distance_to_trace((0, 0))
 
 class HPGLPlot:
     def __init__(self):
@@ -235,7 +250,7 @@ class HPGLPlot:
         return self.blocks[-1]
 
     def connectivity(self, block, retval=None):
-        if not retval:
+        if retval is None:
             retval = []
         retval.append(block)
         for b in self:
@@ -270,12 +285,17 @@ class HPGLPlot:
         self.init_statements['IP'].set_args(0, bounds[1][1], bounds[1][0], 0)
         self.init_statements['SC'].set_args(0, 1, 0, -1, 2)
 
+    def get_init_block(self):
+        for b in self:
+            if b.has_statement('IN'): return b
+        return Block()
+
     def find_passes(self):
-        passes = {'init': [self.blocks[0]], 'pen': [], 'knife': []}
+        passes = {'init': [self.get_init_block()], 'pen': [], 'knife': []}
         
         found_uncuttable = False
-        for b in self.blocks[1:-1]:
-            if not b.cuttable(): 
+        for b in self.blocks[1:]:
+            if not b.has_trace(): 
                 continue
             if b.get_pen() == 1:
                 passes['pen'].append(b)
@@ -324,7 +344,7 @@ def image_preview(commands):
 def show_preview(commands):
     image_preview(commands, rewrite_color).show()
 
-class CutSorter:
+class CutJoiner:
     def __init__(self):
         self.ends = {}
         self.rings = []
@@ -369,26 +389,26 @@ def line_to_block(line: shapely.geometry.LineString):
 
 
 def organize_cuts(plot):
-    sorter = CutSorter()
+    joiner = CutJoiner()
     intake_count = 0
     for b in plot.blocks[:]:
         trace = b.linestring()
         if trace and b.get_pen() == 2:
             plot.blocks.remove(b)
-            sorter.add_unconnected(trace)
+            joiner.add_unconnected(trace)
             intake_count += 1
     print(f"Optimizing {intake_count} cut blocks.")
 
-    for r in sorter.rings:
+    for r in joiner.rings:
         plot.blocks.append(line_to_block(r))
-    print(f"Added {len(sorter.rings)} rings.")
+    print(f"Added {len(joiner.rings)} rings.")
     
     seen = []
-    for l in sorter.ends.values():
+    for l in joiner.ends.values():
         if l in seen: continue
         seen.append(l)
         plot.blocks.append(line_to_block(l))
     print(f"Added {len(seen)} non-rings.")
-    return plot
-        
 
+    plot.blocks.sort(key=Block.geometric_sort_key)
+    return plot

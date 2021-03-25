@@ -101,15 +101,15 @@ out_port = None
 
 if args.dry_run:
     out_port = sys.stdout
-
-if args.plotter == 'direct':
+elif args.plotter == 'direct':
     out_port = open(args.port, 'wb')
 else:
     out_port = serial.Serial(port=args.port, **chosen_plotter_settings)
 
 # Plot passes
 def write_pass(p):
-    out_port.write("".join([str(b) for b in p]).encode('ASCII'))
+    output_string = "".join([str(b) for b in p]) 
+    out_port.write(output_string if out_port == sys.stdout else output_string.encode('ASCII'))
     out_port.flush()
 
 write_pass(passes['init'])

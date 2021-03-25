@@ -42,13 +42,15 @@ def composite_all(images):
 plotter_settings = {
     "titan3" : {
         "baudrate": 38400,
+        "bytesize": serial.EIGHTBITS,
         "xonxoff": True,
         "stopbits":serial.STOPBITS_ONE
-    }
+    },
+    'direct' : {}
 }
 
 arg_parser = argparse.ArgumentParser(description="Send an HPGL file to a plotter.")
-arg_parser.add_argument('--plotter', default='titan3', choices=sorted(plotter_settings.keys()), type=str, help="choose plotter settings.")
+arg_parser.add_argument('--plotter', default='direct', choices=sorted(plotter_settings.keys()), type=str, help="choose plotter settings.")
 arg_parser.add_argument('--dry-run', default=False, const=True, action='store_const', help="Print output to stdout instead of a serial port.")
 arg_parser.add_argument('--preview', default=False, const=True, action='store_const', help="Render preview(s) of the plot.")
 arg_parser.add_argument('--mirror', default=False, const=True, action='store_const', help="Mirror the plot by flipping on the Y axis.")
@@ -95,11 +97,20 @@ if not (args.draw or args.cut):
     exit(0)
 
 # Open output
-out_port = sys.stdout if args.dry_run else serial.Serial(port=args.port, **chosen_plotter_settings)
+out_port = None
+
+if args.dry_run:
+    out_port = sys.stdout
+
+if args.plotter == 'direct':
+    out_port = open(args.port, 'wb')
+else:
+    out_port = serial.Serial(port=args.port, **chosen_plotter_settings)
 
 # Plot passes
 def write_pass(p):
-    out_port.write("".join([str(b) for b in p]))
+    out_port.write("".join([str(b) for b in p]).encode('ASCII'))
+    out_port.flush()
 
 write_pass(passes['init'])
 
@@ -108,7 +119,7 @@ if args.draw:
 
 if args.draw and args.cut:
     while True:
-        response = input("Have you inserted the knife? (type 'yes' and hit ENTER)")
+        response = input("Have you inserted the knife? (type 'yes' and hit ENTER) ")
         if response == 'yes':
             break
 

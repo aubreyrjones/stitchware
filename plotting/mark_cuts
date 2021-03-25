@@ -208,6 +208,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         
         return True
 
+
 class MainWindow(Widget):
     orig_plot = kivy.properties.ObjectProperty()
     opt_plot = kivy.properties.ObjectProperty()
@@ -236,6 +237,7 @@ class MainWindow(Widget):
         with open(self.outfile, 'w') as f:
             f.write(str(self.opt_plot))
 
+
 class MarkCutsApp(App):
     def __init__(self, plot: hpgl.HPGLPlot, outfile, **kwargs):
         self.plot = plot
@@ -245,7 +247,7 @@ class MarkCutsApp(App):
     def build(self):
         self.mainwin = MainWindow(self.outfile)
         self.mainwin.set_plot(self.plot)
-        return self.mainwin # PlotCanvas(self.plot)
+        return self.mainwin
 
 
 def do_main():
@@ -255,7 +257,7 @@ def do_main():
     args = arg_parser.parse_args()
     plot = hpgl.parse_file(args.file)
 
-    outfile = os.path.splitext(args.file)[0] + "-preprocessed.plt"
+    outfile = args.out or (os.path.splitext(args.file)[0] + "-preprocessed.plt")
 
     MarkCutsApp(plot, outfile).run()
 

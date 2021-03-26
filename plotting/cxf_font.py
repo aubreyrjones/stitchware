@@ -59,8 +59,9 @@ def parse_cxf_font(filename):
                 # since font defn has arcs as ccw, we need some font foo
                 if ( end_angle < start_angle ):
                     start_angle -= 360.0
-                # approximate arc with line seg every 5 degrees
-                segs = int((end_angle - start_angle) / 5) + 1
+                # approximate arc with line seg every N degrees
+                N = 5
+                segs = int((end_angle - start_angle) / N) + 1
                 angleincr = (end_angle - start_angle)/segs
                 xstart = cos(start_angle * pi/180) * radius + xcenter
                 ystart = sin(start_angle * pi/180) * radius + ycenter

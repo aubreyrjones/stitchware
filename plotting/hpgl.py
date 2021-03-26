@@ -65,6 +65,16 @@ def vector_normalize(seq, xfactor=1.0):
     l = xfactor / vector_length(seq)
     return type(seq)([s * l for s in seq])
 
+def line_to_block(line: shapely.geometry.LineString, pen_number=None):
+    b = Block()
+    if not pen_number:
+        pen_number = 3 if line.is_ring else 2
+    b.push_back(Statement('SP', [pen_number]))
+    b.push_back(Statement('PU', [line.coords[0]]))
+    b.push_back(Statement('PD', [c for c in line.coords[1:]]))
+    b.push_back(Statement('PU', []))
+    return b
+
 
 class Statement:
     def __init__(self, line: str, *args):
@@ -165,21 +175,16 @@ class Block:
 
     def __iter__(self):
         return iter(self.commands)
-    
-    def uncuttable(self):
-        return any(map(Statement.uncuttable, self.commands))
-    
+        
     def cuttable(self):
-        return not self.uncuttable()
+        return self.has_trace()
     
     def has_trace(self):
         return any(map(Statement.is_trace, self.commands))
 
-    def has_coordinates(self):
-        return any(map(Statement.needs_coordinates, self.commands))
-    
     def extents(self):
-        return coord_extents(list(chain(*map(lambda s: s.parsed_args, filter(Statement.needs_coordinates, self.commands)))))
+        bounds = self.linestring().bounds
+        return tuple(bounds[:2]), tuple(bounds[2:])
 
     def has_statement(self, *args):
         for s in self:
@@ -233,6 +238,16 @@ class Block:
         if self.has_statement('IN') or not self.has_trace(): return -2**32
         return self.distance_to_trace((0, 0))
 
+    def get_text_properties(self):
+        if not self.has_statement('LB'): return None
+        text_params = {}
+        terminator = self.get_statement('DT').tail[0]
+        full_text = self.get_statement('LB').tail
+        text_params['text'] = full_text[:full_text.rfind(terminator)]
+        text_params['origin'] = self.get_statement('PA').parsed_args[0]
+        text_params['direction'] = self.get_statement('DI').parsed_args[0]
+        return text_params
+
 
 class HPGLPlot:
     def __init__(self):
@@ -282,14 +297,8 @@ class HPGLPlot:
     def __str__(self):
         return "".join(map(str, iter(self)))
     
-    def cuttable(self):
-        return filter(Block.cuttable, self)
-
-    def cuttable_repr(self):
-        return "\n".join(map(lambda s: repr(s), self.cuttable()))
-    
     def extents(self):
-        return coord_extents(list(chain(*map(Block.extents, filter(Block.has_coordinates, self.blocks[1:]))))) # this is just a bandaid, skipping the init
+        return coord_extents(list(chain(*map(Block.extents, filter(Block.has_trace, self.blocks)))))
 
     def mirror(self):
         bounds = self.extents()
@@ -388,15 +397,6 @@ class CutJoiner:
     
     def get_cuts(self):
         return chain(self.rings, set(self.ends.values()))
-
-def line_to_block(line: shapely.geometry.LineString):
-    b = Block()
-    b.push_back(Statement('SP', [3 if line.is_ring else 2]))
-    b.push_back(Statement('PU', [line.coords[0]]))
-    b.push_back(Statement('PD', [c for c in line.coords[1:]]))
-    b.push_back(Statement('PU', []))
-    return b
-
 
 def organize_cuts(plot):
     joiner = CutJoiner()

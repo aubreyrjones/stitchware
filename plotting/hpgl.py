@@ -52,7 +52,7 @@ def coord_extents(coords):
     return (mins, maxes)
 
 def strip_endline(l):
-    return l[:-2] if l.endswith(';\n') else l
+    return l.strip(';\n ')
 
 def flatten_blocks_to_text(blocks: list):
     return "".join(map(str, blocks))
@@ -222,7 +222,8 @@ class Block:
         distance = trace_string.distance(query_point)
         return distance
     
-    def connects_to(self, other_trace: list, retval=[]):
+    def connects_to(self, other_trace: list, retval=None):
+        if retval is None: retval = []
         if not self.has_trace(): return False
         if extend_line(self.trace(), other_trace):
             return True
@@ -231,6 +232,7 @@ class Block:
     def geometric_sort_key(self):
         if self.has_statement('IN') or not self.has_trace(): return -2**32
         return self.distance_to_trace((0, 0))
+
 
 class HPGLPlot:
     def __init__(self):
@@ -260,8 +262,7 @@ class HPGLPlot:
         return self.blocks[-1]
 
     def connectivity(self, block, retval=None):
-        if retval is None:
-            retval = []
+        if retval is None: retval = []
         retval.append(block)
         for b in self:
             if b in retval: continue

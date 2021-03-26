@@ -110,7 +110,7 @@ class Statement:
         return self.command in ('PD')
 
     def set_args(self, *args):
-        self.parsed_args = list(args)
+        self.parsed_args = args[0] if (len(args) == 1 and type(args[0]) == list) else list(args)
         self.rewrite()
 
     def rewrite(self):
@@ -144,6 +144,16 @@ class Block:
         o.jitter = self.jitter
         return o
     
+    def repeat_continuous_trace(self, count):
+        pd_statement = self.get_statement('PD')
+        pd_statement.set_args(pd_statement.parsed_args * count)
+    
+    def get_statement(self, cmd):
+        for s in self:
+            if s.command == cmd:
+                return s
+        return None
+
     def push_back(self, statement):
         self.commands.append(statement)
     
@@ -293,7 +303,6 @@ class HPGLPlot:
     def find_passes(self):
         passes = {'init': [self.get_init_block()], 'pen': [], 'knife': []}
         
-        found_uncuttable = False
         for b in self.blocks[1:]:
             if not b.has_trace(): 
                 continue

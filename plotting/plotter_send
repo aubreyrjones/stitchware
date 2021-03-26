@@ -6,6 +6,7 @@ from functools import reduce
 from PIL import Image
 import curtsies
 import hpgl
+import os
 
 def prompt_input():
     with curtsies.Input() as input:
@@ -53,10 +54,10 @@ arg_parser = argparse.ArgumentParser(description="Send an HPGL file to a plotter
 arg_parser.add_argument('--plotter', default='direct', choices=sorted(plotter_settings.keys()), type=str, help="choose plotter settings.")
 arg_parser.add_argument('--dry-run', default=False, const=True, action='store_const', help="Print output to stdout instead of a serial port.")
 arg_parser.add_argument('--preview', default=False, const=True, action='store_const', help="Render preview(s) of the plot.")
-arg_parser.add_argument('--mirror', default=False, const=True, action='store_const', help="Mirror the plot by flipping on the Y axis.")
-arg_parser.add_argument('--draw', default=False, const=True, action='store_const', help="Send the pen pass.")
-arg_parser.add_argument('--cut', default=False, const=True, action='store_const', help="Send the cutting pass.")
-arg_parser.add_argument('--repeat', type=int, help="Repeat the pattern REPEAT times.")
+arg_parser.add_argument('--mirror', default=False, const=True, action='store_const', help="Mirror the plot by flipping on the Y axis. Currently not implemented.")
+arg_parser.add_argument('--draw', type=int, default=0, const=1, nargs='?', help="How many times to send the drawing (pen) pass.")
+arg_parser.add_argument('--cut', type=int, default=0, const=1, nargs='?', help="How many times to send the cutting (knife) pass.")
+#arg_parser.add_argument('--repeat', type=int, help="Repeat the pattern REPEAT times.")
 arg_parser.add_argument('port', type=str, help="The serial port the plotter is connected to.")
 arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
 args = arg_parser.parse_args()
@@ -66,8 +67,8 @@ chosen_plotter_settings = plotter_settings[args.plotter]
 # Load and transform plot
 plot = hpgl.parse_file(args.file)
 
-if args.mirror:
-    plot.mirror()
+# if args.mirror:
+#     plot.mirror()
 
 # Render passes
 passes = plot.find_passes()
@@ -85,12 +86,22 @@ if args.preview:
     if prompt_input() == 'n':
         exit(0)
 
-if args.repeat:
+def repeat_pass(pass_name):
     repeated = []
-    for b in passes['knife']:
-        for i in range(args.repeat):
+    for b in passes[pass_name]:
+        if b.linestring().is_closed:
+            b.repeat_continuous_trace(args.cut)
             repeated.append(b)
-    passes['knife'] = repeated
+        else:
+            for i in range(args.cut):
+                repeated.append(b)
+    passes[pass_name] = repeated
+
+if args.draw > 1:
+    repeat_pass('pen')
+
+if args.cut > 1:
+    repeat_pass('knife')
 
 if not (args.draw or args.cut):
     print("Neither --cut nor --draw specified. Exiting.")
@@ -100,7 +111,7 @@ if not (args.draw or args.cut):
 out_port = None
 
 if args.dry_run:
-    out_port = sys.stdout
+    out_port = os.fdopen(sys.stdout.fileno(), 'wb')
 elif args.plotter == 'direct':
     out_port = open(args.port, 'wb')
 else:
@@ -108,11 +119,11 @@ else:
 
 # Plot passes
 def write_pass(p):
-    output_string = "".join([str(b) for b in p]) 
-    out_port.write(output_string if out_port == sys.stdout else output_string.encode('ASCII'))
+    output_string = "".join([str(b) for b in p])
+    out_port.write(output_string.encode('ASCII'))
     out_port.flush()
 
-write_pass(passes['init'])
+#write_pass(passes['init']) # this apparently does nothing anyway since the plotter doesn't honor SC.
 
 if args.draw:
     write_pass(passes['pen'])

@@ -9,15 +9,19 @@ import subprocess, io
 from PIL import Image, ImagePalette
 import shapely, shapely.geometry, shapely.ops
 import random, math
+from shapely.geometry import Point
 
-def extend_line(a, b):
-    if a[-1] == b[0]:
+def dist(a, b):
+    return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
+
+def extend_line(a, b, fuzzy=0):
+    if dist(a[-1], b[0]) <= fuzzy:
         return a + b[1:]
-    if b[-1] == a[0]:
+    if dist(b[-1], a[0]) <= fuzzy:
         return b + a[1:]
-    if a[0] == b[0]:
+    if dist(a[0], b[0]) <= fuzzy:
         return list(reversed(a)) + b[1:]
-    if a[-1] == b[-1]:
+    if dist(a[-1], b[-1]) <= fuzzy:
         return a[:-1] + list(reversed(b))
     return None
 
@@ -28,7 +32,7 @@ def parse_list_as_type(strings, t):
     return list(iterate_as_type(strings, t))
 
 def iterate_as_coords(coords):
-    return zip(iterate_as_type(coords[::2], int), iterate_as_type(coords[1::2], int))
+    return zip(iterate_as_type(coords[::2], float), iterate_as_type(coords[1::2], float))
 
 def parse_list_as_coords(strings):
     return list(iterate_as_coords(strings))
@@ -67,7 +71,7 @@ def vector_normalize(seq, xfactor=1.0):
 
 def line_to_block(line: shapely.geometry.LineString, pen_number=None):
     b = Block()
-    if not pen_number:
+    if pen_number is None:
         pen_number = 3 if line.is_ring else 2
     b.push_back(Statement('SP', [pen_number]))
     b.push_back(Statement('PU', [line.coords[0]]))
@@ -110,11 +114,8 @@ class Statement:
         which_args = self.parsed_args if self.parsed_args else self.split_tail
         return f"{self.command} {repr(which_args)}"
     
-    def uncuttable(self):
-        return self.command in ('LB', 'DT', 'DI')
-
     def needs_coordinates(self):
-        return self.command in ('PU', 'PD', 'PA')
+        return self.command in ('PU', 'PD', 'PA', 'DI', 'SI')
 
     def is_trace(self):
         return self.command in ('PD')
@@ -126,7 +127,7 @@ class Statement:
     def rewrite(self):
         if not self.parsed_args: return
         if self.needs_coordinates():
-            self.split_tail = [str(int(a)) for a in flatten_coords(self.parsed_args)]
+            self.split_tail = [str(float(a)) for a in flatten_coords(self.parsed_args)]
         else:
             self.split_tail = [str(a) for a in self.parsed_args]
         self.tail = ','.join(self.split_tail)
@@ -238,14 +239,19 @@ class Block:
         if self.has_statement('IN') or not self.has_trace(): return -2**32
         return self.distance_to_trace((0, 0))
 
+    def is_text(self):
+        return self.has_statement('LB')
+
     def get_text_properties(self):
-        if not self.has_statement('LB'): return None
+        if not self.is_text(): return None
+
         text_params = {}
         terminator = self.get_statement('DT').tail[0]
         full_text = self.get_statement('LB').tail
         text_params['text'] = full_text[:full_text.rfind(terminator)]
         text_params['origin'] = self.get_statement('PA').parsed_args[0]
         text_params['direction'] = self.get_statement('DI').parsed_args[0]
+        text_params['size'] = self.get_statement('SI').parsed_args[0]
         return text_params
 
 
@@ -311,15 +317,17 @@ class HPGLPlot:
         return Block()
 
     def find_passes(self):
-        passes = {'init': [self.get_init_block()], 'pen': [], 'knife': []}
+        passes = {'init': [self.get_init_block()], 'pen': [], 'knife': [], 'labels': []}
         
         for b in self.blocks[1:]:
             if not b.has_trace(): 
                 continue
-            if b.get_pen() == 1:
+            if b.get_pen() in (1, ):
                 passes['pen'].append(b)
             elif b.get_pen() in (2, 3):
                 passes['knife'].append(b)
+            elif b.get_pen() in (4, ):
+                passes['labels'].append(b)
         
         return passes
 
@@ -347,7 +355,7 @@ def render_preview(commands, outfile):
     subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-f', outfile], input="".join(map(str, commands)).encode('ASCII'))
 
 def image_preview(commands):
-    completed = subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-c', '124', '-f', '-'], input="".join(map(str, commands)).encode('ASCII'), stdout=subprocess.PIPE)
+    completed = subprocess.run(['hp2xx', '-q', '-t', '-x', '0', '-y', '0', '-m', 'png', '-c', '124111', '-f', '-'], input="".join(map(str, commands)).encode('ASCII'), stdout=subprocess.PIPE)
     img = Image.open(io.BytesIO(completed.stdout))
     img = img.convert('RGBA')
     newImage = []
@@ -396,7 +404,16 @@ class CutJoiner:
             self.ends[c] = line
     
     def get_cuts(self):
-        return chain(self.rings, set(self.ends.values()))
+        return chain(self.rings, self.ends.values())
+    
+    def get_unique(self):
+        seen = []
+        for l in self.get_cuts():
+            if l in seen: continue
+            seen.append(l)
+        return seen
+
+
 
 def organize_cuts(plot):
     joiner = CutJoiner()
@@ -420,5 +437,5 @@ def organize_cuts(plot):
         plot.blocks.append(line_to_block(l))
     print(f"Added {len(seen)} non-rings.")
 
-    plot.blocks.sort(key=Block.geometric_sort_key)
     return plot
+

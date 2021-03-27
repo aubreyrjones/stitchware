@@ -11,7 +11,7 @@ from kivy.graphics.transformation import Matrix
 from kivy.core.window import Window
 import kivy.graphics, kivy.properties, kivy.event
 import random, time, os.path
-import hpgl
+import hpgl, hpgl_text
 
 random.seed(time.time())
 
@@ -84,7 +84,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
                 block_pen = block.get_pen()
                 block_trace = block.trace(self.jitter_blocks)
                 if block_trace:
-                    if block_pen == 1:
+                    if block_pen in (1, 4):
                         kivy.graphics.Color(1, 1, 1, 0.5)
                     elif block_pen == 2:
                         kivy.graphics.Color(1, 0, 0, 0.5)
@@ -94,7 +94,8 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
                         kivy.graphics.Color(0, 1, 0, 0.5)
                     flat_coords = hpgl.flatten_coords(block_trace)
                     kivy.graphics.Line(points=flat_coords, width=1.0)
-                    kivy.graphics.Line(points=flat_coords, width=8.0)
+                    if block_pen != 4:
+                        kivy.graphics.Line(points=flat_coords, width=8.0)
 
         with self.canvas.after:
             kivy.graphics.PopMatrix()
@@ -192,7 +193,7 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
         if touch.button == 'left':
             for nb in nearest_block:
                 cur_pen = nb.get_pen()
-                nb.set_pen(1 if cur_pen != 1 else 2)
+                nb.set_pen(1 if cur_pen in (2, 3) else 2)
         elif touch.button == 'middle':
             for nb in nearest_block:
                 cur_pen = nb.get_pen()
@@ -253,9 +254,12 @@ class MarkCutsApp(App):
 def do_main():
     arg_parser = argparse.ArgumentParser(description="Mark HPGL blocks for cutting vs. plotting.")
     arg_parser.add_argument('--out', type=str, help="Output file, otherwise automatically generate name.")
+    arg_parser.add_argument('--font', default='courier', choices=sorted(hpgl_text.font_stash.keys()), type=str, help="Choose font name")
     arg_parser.add_argument('file', type=str, help="The file of HPGL commands to send.")
     args = arg_parser.parse_args()
     plot = hpgl.parse_file(args.file)
+
+    hpgl_text.rewrite_labels(plot, args.font)
 
     outfile = args.out or (os.path.splitext(args.file)[0] + "-preprocessed.plt")
 

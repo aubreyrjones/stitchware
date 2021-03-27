@@ -72,12 +72,14 @@ plot = hpgl.parse_file(args.file)
 
 # Find passes and preview
 passes = plot.find_passes()
+passes['knife'].sort(key=hpgl.Block.geometric_sort_key)
+passes['pen'].sort(key=hpgl.Block.geometric_sort_key)
 
 if args.preview:
     images = []
 
     images.append(hpgl.image_preview(passes['init'] + passes['knife']))
-    images.append(hpgl.image_preview(passes['init'] + passes['pen']))
+    images.append(hpgl.image_preview(passes['init'] + passes['pen'] + passes['labels']))
 
     composited = composite_all(images)
     composited.show()
@@ -131,6 +133,7 @@ def write_pass(p):
 
 if args.draw:
     write_pass(passes['pen'])
+    write_pass(passes['labels'])
 
 if args.draw and args.cut:
     while True:

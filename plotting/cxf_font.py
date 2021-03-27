@@ -18,7 +18,7 @@ def parse_cxf_font(filename):
     key = None
     num_cmds = 0
     line_num = 0
-    with open(filename, 'r') as file:
+    with open(filename, 'r', encoding='ascii') as file:
         for text in file:
             #format for a typical letter (lowercase r):
             ##comment, with a blank line after it
@@ -33,7 +33,7 @@ def parse_cxf_font(filename):
             if end_char and key: #save the character to our dictionary
                 font[key] = stroke_list
                 if (num_cmds != cmds_read):
-                    print("(warning: discrepancy in number of commands %s, line %s, %s != %s )" % (fontfile, line_num, num_cmds, cmds_read))
+                    print("(warning: discrepancy in number of commands %s, line %s, %s != %s )" % (filename, line_num, num_cmds, cmds_read))
 
             new_cmd = re.match('^\[(.*)\]\s(\d+)', text)
             if new_cmd: #new character
@@ -60,7 +60,7 @@ def parse_cxf_font(filename):
                 if ( end_angle < start_angle ):
                     start_angle -= 360.0
                 # approximate arc with line seg every N degrees
-                N = 5
+                N = 20
                 segs = int((end_angle - start_angle) / N) + 1
                 angleincr = (end_angle - start_angle)/segs
                 xstart = cos(start_angle * pi/180) * radius + xcenter

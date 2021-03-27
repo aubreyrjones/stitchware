@@ -17,11 +17,12 @@ def map_glyph_vector(stroke_f, glyphs: list):
 class Glyph:
     def __init__(self, strokes):
         self.strokes = strokes
-        self.glom = shapely.geometry.MultiLineString(self.strokes)
-        self.bounds = self.glom.bounds
-        self.bounds = [tuple(self.bounds[:2]), tuple(self.bounds[2:])]
-        self.width = self.bounds[1][0] - self.bounds[0][0]
-        self.height = self.bounds[1][1] - self.bounds[0][1]
+        glom = shapely.geometry.MultiLineString(self.strokes)
+        bounds = glom.bounds
+        bounds = [tuple(bounds[:2]), tuple(bounds[2:])]
+        self.width = bounds[1][0] - bounds[0][0]
+        self.height = bounds[1][1] - bounds[0][1]
+        self.strokes = self.mapped(lambda s: translate(s, xoff=-bounds[0][0]))
     
     def mapped(self, f):
         return map_glyph(f, self.strokes)
@@ -91,7 +92,7 @@ def rewrite_labels(plot, fontname='courier'):
 
 #font_stash['courier'] = load_transformable_font(os.path.expanduser('~/cxf_fonts/courier.cxf'))
 
-font_files = glob.glob(os.path.expanduser('~/cxf_fonts/*.cxf'))
+font_files = glob.glob(os.path.expanduser('~/cxf_fonts/courier.cxf'))
 for ff in font_files:
     try:
         fontname = os.path.basename(os.path.splitext(ff)[0])

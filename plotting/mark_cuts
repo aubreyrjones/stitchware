@@ -203,7 +203,8 @@ class PlotCanvas(Widget, kivy.event.EventDispatcher):
             for c in connected:
                 c.set_pen(2)
         else:
-            print(touch.button)
+            #print(touch.button)
+            pass
         
         self.dispatch('on_update_plot')
         

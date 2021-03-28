@@ -3,19 +3,24 @@ import cxf_font
 import hpgl
 import os.path
 from shapely.affinity import rotate, scale, translate
+from shapely.geometry import LineString, Point
 from math import atan2
 import glob
+from typing import *
 
+font_stash: Dict[str, Dict[str, Glyph]]
 font_stash = {}
 
-def map_glyph(f, strokes: list):
+Coord = Tuple[float, float]
+
+def map_glyph(f, strokes: List[LineString]):
     return [f(s) for s in strokes]
 
-def map_glyph_vector(stroke_f, glyphs: list):
+def map_glyph_vector(stroke_f, glyphs: List[List[LineString]]):
     return [map_glyph(stroke_f, g) for g in glyphs]
 
 class Glyph:
-    def __init__(self, strokes):
+    def __init__(self, strokes: List[LineString]):
         self.strokes = strokes
         glom = shapely.geometry.MultiLineString(self.strokes)
         bounds = glom.bounds
@@ -23,16 +28,17 @@ class Glyph:
         self.width = bounds[1][0] - bounds[0][0]
         self.height = bounds[1][1] - bounds[0][1]
         self.strokes = self.mapped(lambda s: translate(s, xoff=-bounds[0][0]))
+        #self.strokes.append(LineString([Point(0, 0), Point(self.width, 0), Point(self.width, self.height), Point(0, self.height), Point(0, 0)]))
     
-    def mapped(self, f):
+    def mapped(self, f: Callable) -> List[LineString]:
         return map_glyph(f, self.strokes)
     
 
-def coords_list_to_points(coords):
+def coords_list_to_points(coords: List[Coord]) -> List[Point]:
     return list(map(shapely.geometry.Point, coords))
 
 
-def load_transformable_font(filename):
+def load_transformable_font(filename: str):
     raw_strokes = cxf_font.parse_cxf_font(filename)
     for k in raw_strokes.keys():
         conjoined = [raw_strokes[k][0]]
@@ -48,12 +54,14 @@ def load_transformable_font(filename):
 
     return raw_strokes
 
-def calculate_font_scale(fontname: str, cm_size: tuple):
+
+def calculate_font_scale(fontname: str, cm_size: Tuple[float, float]) -> Tuple[float, float]:
     glyph_size = font_stash[fontname]['X'].width, font_stash[fontname]['X'].height
     return (cm_size[0] * 400 / glyph_size[0], cm_size[1] * 400 / glyph_size[1])
 
 
-def glyph_string(font, text, t=(0,0), r=0, fontscale=(1, 25)):
+def glyph_string(font, text, t=(0.0, 0.0), r=0.0, fontscale=(1.0, 25.0)):
+    kernwidth = font['X'].width * 0.2
     retval = []
     x_accum = 0.0
     for c in text:
@@ -61,15 +69,16 @@ def glyph_string(font, text, t=(0,0), r=0, fontscale=(1, 25)):
             c = 'X'
         glyph = font[c]
         retval.append(glyph.mapped(lambda line: translate(scale(line, xfact=fontscale[0], yfact=fontscale[1], origin=(0, 0)), xoff=x_accum)))
-        x_accum += (glyph.width * fontscale[0] * 1.1) # kerning like a champ.
+        x_accum += (glyph.width + kernwidth) * fontscale[0] # kerning like a champ lol
     
     retval = map_glyph_vector(lambda s: translate(rotate(s, r, origin=(0, 0), use_radians=True), xoff=t[0], yoff=t[1]), retval)
     return retval
 
-def label_to_traces(text_params, fontname='courier'):
-    dx, dy = text_params['direction']
 
+def label_to_traces(text_params: dict, fontname='courier'):
+    dx, dy = text_params['direction']
     angle = atan2(dy, dx)
+
     fontscale = calculate_font_scale(fontname, text_params['size'])
 
     glyphs = glyph_string(font_stash[fontname], text_params['text'], t=text_params['origin'], r=angle, fontscale=fontscale)
@@ -78,7 +87,8 @@ def label_to_traces(text_params, fontname='courier'):
         retval.extend([hpgl.line_to_block(stroke, 4) for stroke in g])
     return retval
 
-def rewrite_first_label(plot, fontname='courier'):
+
+def rewrite_first_label(plot: hpgl.HPGLPlot, fontname='courier'):
     for idx, b in enumerate(plot.blocks[:]):
         if not b.is_text(): continue
         print(idx)
@@ -86,13 +96,13 @@ def rewrite_first_label(plot, fontname='courier'):
         return True
     return False    
 
-def rewrite_labels(plot, fontname='courier'):
+def rewrite_labels(plot: hpgl.HPGLPlot, fontname='courier'):
     while rewrite_first_label(plot, fontname): pass
 
 
 #font_stash['courier'] = load_transformable_font(os.path.expanduser('~/cxf_fonts/courier.cxf'))
 
-font_files = glob.glob(os.path.expanduser('~/cxf_fonts/courier.cxf'))
+font_files = glob.glob(os.path.expanduser('~/cxf_fonts/*.cxf'))
 for ff in font_files:
     try:
         fontname = os.path.basename(os.path.splitext(ff)[0])

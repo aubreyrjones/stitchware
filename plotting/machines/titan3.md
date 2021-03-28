@@ -35,7 +35,7 @@ Usage Notes:
 
 While highly functional and relatively easy to operate, this plotter
 seems to support only a relatively limited subset of HPGL commands. In
-particular, the 'IP' and `SC` commands seem to have no effect. This
+particular, the `IP` and `SC` commands seem to have no effect. This
 means that common HPGL idioms based on manipulation of origin and
 scaling simply do not work, and geometric transforms must be carried
 out on the vertex data itself prior to plotting. While I haven't

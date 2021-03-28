@@ -10,19 +10,32 @@ from PIL import Image, ImagePalette
 import shapely, shapely.geometry, shapely.ops
 import random, math
 from shapely.geometry import Point
+from typing import *
+
+Coord = Tuple[float, float]
 
 def dist(a, b):
     return math.sqrt((a[0] - b[0])**2 + (a[1] - b[1])**2)
 
 def extend_line(a, b, fuzzy=0):
-    if dist(a[-1], b[0]) <= fuzzy:
-        return a + b[1:]
-    if dist(b[-1], a[0]) <= fuzzy:
-        return b + a[1:]
-    if dist(a[0], b[0]) <= fuzzy:
-        return list(reversed(a)) + b[1:]
-    if dist(a[-1], b[-1]) <= fuzzy:
-        return a[:-1] + list(reversed(b))
+    if not fuzzy:
+        if a[-1] == b[0]:
+            return a + b[1:]
+        if b[-1] == a[0]:
+            return b + a[1:]
+        if a[0] == b[0]:
+            return list(reversed(a)) + b[1:]
+        if a[-1] == b[-1]:
+            return a[:-1] + list(reversed(b))
+    else:
+        if dist(a[-1], b[0]) <= fuzzy:
+            return a + b[1:]
+        if dist(b[-1], a[0]) <= fuzzy:
+            return b + a[1:]
+        if dist(a[0], b[0]) <= fuzzy:
+            return list(reversed(a)) + b[1:]
+        if dist(a[-1], b[-1]) <= fuzzy:
+            return a[:-1] + list(reversed(b))
     return None
 
 def iterate_as_type(strings, t):
@@ -81,11 +94,13 @@ def line_to_block(line: shapely.geometry.LineString, pen_number=None):
 
 
 class Statement:
+
     def __init__(self, line: str, *args):
         self.command = line[:2]
         self.tail = ''
-        self.split_tail = []
-        self.parsed_args = []
+        self.split_tail: List[str] = []
+        self.parsed_args: List[Any] = []
+
         if args:
             if type(args[0]) is list:
                 self.set_args(*args[0])
@@ -114,10 +129,10 @@ class Statement:
         which_args = self.parsed_args if self.parsed_args else self.split_tail
         return f"{self.command} {repr(which_args)}"
     
-    def needs_coordinates(self):
+    def needs_coordinates(self) -> bool:
         return self.command in ('PU', 'PD', 'PA', 'DI', 'SI')
 
-    def is_trace(self):
+    def is_trace(self) -> bool:
         return self.command in ('PD')
 
     def set_args(self, *args):
@@ -138,34 +153,24 @@ class Block:
         self.commands = []
         self.jitter = vector_normalize((random.uniform(-1, 1), random.uniform(-1, 1)), random.uniform(50, 150))
 
-    # def __lt__(self, o):
-    #     if self.has_statement('IN'):
-    #         return not o.has_statement('IN')
-    #     elif o.has_statement('IN'): return False
-            
-    #     my_extents = self.extents()
-    #     o_extents = o.extents()
-    #     if my_extents[0] == o_extents[0]:
-    #         return my_extents[1] < o_extents[1]
-    #     return my_extents[0] < o_extents[0]
-
-    def clone(self):
+    def clone(self) -> Block:
         o = Block()
         o.commands = [c.clone() for c in self.commands]
         o.jitter = self.jitter
         return o
     
-    def repeat_continuous_trace(self, count):
+    def repeat_continuous_trace(self, count: int):
         pd_statement = self.get_statement('PD')
+        if not pd_statement: return
         pd_statement.set_args(pd_statement.parsed_args * count)
     
-    def get_statement(self, cmd):
+    def get_statement(self, cmd: str) -> Optional[Statement]:
         for s in self:
             if s.command == cmd:
                 return s
         return None
 
-    def push_back(self, statement):
+    def push_back(self, statement: Statement):
         self.commands.append(statement)
     
     def __repr__(self):
@@ -174,7 +179,7 @@ class Block:
     def __str__(self):
         return "".join(map(str, self.commands))
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Statement]:
         return iter(self.commands)
         
     def cuttable(self):
@@ -183,9 +188,11 @@ class Block:
     def has_trace(self):
         return any(map(Statement.is_trace, self.commands))
 
-    def extents(self):
-        bounds = self.linestring().bounds
-        return tuple(bounds[:2]), tuple(bounds[2:])
+    def extents(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        ls = self.linestring()
+        if not ls: return ((0, 0), (0, 0))
+        bounds = ls.bounds
+        return ((bounds[0], bounds[1]), (bounds[2], bounds[3]))
 
     def has_statement(self, *args):
         for s in self:
@@ -193,19 +200,19 @@ class Block:
                 return True
         return False
 
-    def get_pen(self):
+    def get_pen(self) -> Optional[int]:
         for s in self:
             if s.command == 'SP':
                 return s.parsed_args[0]
         return None
     
-    def set_pen(self, pen_number):
+    def set_pen(self, pen_number: int):
         for s in self:
             if s.command == 'SP':
                 s.set_args(pen_number)
                 break
 
-    def trace(self, do_jitter=False):
+    def trace(self, do_jitter=False) -> Optional[List[Tuple[float, float]]]:
         if not self.has_trace(): return None
         block_trace = []
         for cmd in self:
@@ -217,41 +224,43 @@ class Block:
             block_trace = [(x + self.jitter[0], y + self.jitter[1]) for x, y in block_trace]
         return block_trace
 
-    def linestring(self, do_jitter=False):
-        if not self.has_trace(): return None
-        return shapely.geometry.LineString([shapely.geometry.Point(p) for p in self.trace(do_jitter)])
+    def linestring(self, do_jitter=False) -> Optional[shapely.geometry.LineString]:
+        trace = self.trace(do_jitter)
+        if not trace: return None
+        return shapely.geometry.LineString([shapely.geometry.Point(p) for p in trace])
 
-    def distance_to_trace(self, point: tuple, do_jitter=False):
-        if not self.has_trace(): return 2**31
-        query_point = shapely.geometry.Point(*point)
+    def distance_to_trace(self, point: Tuple[float, float], do_jitter=False) -> float:
         trace_string = self.linestring(do_jitter)
+        if not trace_string: return 2**31
+
+        query_point = shapely.geometry.Point(*point)
         distance = trace_string.distance(query_point)
         return distance
     
-    def connects_to(self, other_trace: list, retval=None):
+    def connects_to(self, other_trace: List[Tuple[float, float]], retval=None):
         if retval is None: retval = []
         if not self.has_trace(): return False
         if extend_line(self.trace(), other_trace):
             return True
         return False
     
-    def geometric_sort_key(self):
+    def geometric_sort_key(self) -> float:
         if self.has_statement('IN') or not self.has_trace(): return -2**32
         return self.distance_to_trace((0, 0))
 
     def is_text(self):
         return self.has_statement('LB')
 
-    def get_text_properties(self):
+    def get_text_properties(self) -> Optional[Dict[str, Any]]:
         if not self.is_text(): return None
 
         text_params = {}
-        terminator = self.get_statement('DT').tail[0]
-        full_text = self.get_statement('LB').tail
-        text_params['text'] = full_text[:full_text.rfind(terminator)]
-        text_params['origin'] = self.get_statement('PA').parsed_args[0]
-        text_params['direction'] = self.get_statement('DI').parsed_args[0]
-        text_params['size'] = self.get_statement('SI').parsed_args[0]
+        terminator = self.get_statement('DT').tail[0] #type: ignore
+        full_text = self.get_statement('LB').tail # type: ignore
+        text_params['text'] = full_text[:full_text.rfind(terminator)] 
+        text_params['origin'] = self.get_statement('PA').parsed_args[0] # type: ignore
+        text_params['direction'] = self.get_statement('DI').parsed_args[0] # type: ignore
+        text_params['size'] = self.get_statement('SI').parsed_args[0] # type: ignore
         return text_params
 
 
